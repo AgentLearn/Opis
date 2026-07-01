@@ -1,0 +1,552 @@
+{
+  "ArrivalEstimator::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954771+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954771+00:00",
+    "line": "\u2717 gate 'ArrivalEstimator' outcome 'estimated': flow 'arrival_estimate' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "CancellationRecorder::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954785+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954785+00:00",
+    "line": "\u2717 gate 'CancellationRecorder' outcome 'recorded': flow 'ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "CancellationThrottle::dead-end-output": {
+    "first_seen": "2026-07-01T12:54:02.002376+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:54:02.002376+00:00",
+    "line": "\u2717 gate 'CancellationThrottle' outcome 'below_threshold': flow 'assignment_ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "DriverAuthSentinel::dead-end-output": {
+    "first_seen": "2026-07-01T12:55:21.259669+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954765+00:00",
+    "line": "\u2717 gate 'DriverAuthSentinel' outcome 'authenticated': flow 'auth_token' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 1,
+    "runs_fixed": [
+      "20260701T132519Z",
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z",
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 2,
+    "times_seen": 2
+  },
+  "DriverAuthSentinel::unreachable-input": {
+    "first_seen": "2026-07-01T12:55:21.259652+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954742+00:00",
+    "line": "\u2717 gate 'DriverAuthSentinel': requires ['auth_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'auth_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 1,
+    "runs_fixed": [
+      "20260701T132519Z",
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z",
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 2,
+    "times_seen": 2
+  },
+  "DriverAuthSentinelDispatch::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954776+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954776+00:00",
+    "line": "\u2717 gate 'DriverAuthSentinelDispatch' outcome 'authenticated': flow 'auth_token' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "DriverAuthSentinelDispatch::unreachable-input": {
+    "first_seen": "2026-07-01T13:35:20.954760+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954760+00:00",
+    "line": "\u2717 gate 'DriverAuthSentinelDispatch': requires ['auth_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'auth_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "DriverDispatcher::dead-end-output": {
+    "first_seen": "2026-07-01T12:54:02.002361+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:55:21.259673+00:00",
+    "line": "\u2717 gate 'DriverDispatcher' outcome 'tracking_updated': flow 'driver_tracking' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 3
+  },
+  "DriverNoAcceptSuspension::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954780+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954780+00:00",
+    "line": "\u2717 gate 'DriverNoAcceptSuspension' outcome 'warned': flow 'ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "LateCancellationCooldown::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954786+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954786+00:00",
+    "line": "\u2717 gate 'LateCancellationCooldown' outcome 'warned': flow 'ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "MultiDriverDispatcher::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954773+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954774+00:00",
+    "line": "\u2717 gate 'MultiDriverDispatcher' outcome 'dispatch_event': flow 'ride_completion_event' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 2
+  },
+  "NoAcceptThrottle::dead-end-output": {
+    "first_seen": "2026-07-01T12:54:02.002369+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:54:02.002369+00:00",
+    "line": "\u2717 gate 'NoAcceptThrottle' outcome 'below_threshold': flow 'assignment_ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "NoAcceptThrottle::unreachable-input": {
+    "first_seen": "2026-07-01T12:54:02.002354+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:54:02.002354+00:00",
+    "line": "\u2717 gate 'NoAcceptThrottle': requires ['driver_no_accept_event'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'driver_no_accept_event' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "ReassignmentDispatcher::dead-end-output": {
+    "first_seen": "2026-07-01T12:54:02.002365+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:55:21.259675+00:00",
+    "line": "\u2717 gate 'ReassignmentDispatcher' outcome 'tracking_updated': flow 'driver_tracking' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 3
+  },
+  "ReassignmentThrottle::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954778+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954778+00:00",
+    "line": "\u2717 gate 'ReassignmentThrottle' outcome 'suppressed': flow 'ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideCompleteValidator::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954783+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954783+00:00",
+    "line": "\u2717 gate 'RideCompleteValidator' outcome 'rejected': flow 'rejected_ride_request' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideCompleteValidator::template-mismatch": {
+    "first_seen": "2026-07-01T13:36:38.906920+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:36:38.906920+00:00",
+    "line": "- gate 'RideCompleteValidator' claims gate_template 'order_validator', which requires input slot type(s) ['inventory_update', 'routing_decision'], but the instance's requires ['accepted_ride_request', 'ride_payment_confirmed'] never covers these (or any subtype/supertype) \u2014 the gate template's actual contract isn't honored, only superficially referenced",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideCompletionRecorder::unreachable-input": {
+    "first_seen": "2026-07-01T13:35:20.954763+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954763+00:00",
+    "line": "\u2717 gate 'RideCompletionRecorder': requires ['ride_completion_event'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'ride_completion_event' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideCompletionValidator::dead-end-output": {
+    "first_seen": "2026-07-01T12:54:02.002372+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:55:21.259677+00:00",
+    "line": "\u2717 gate 'RideCompletionValidator' outcome 'completed': flow 'validated_ride' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 3
+  },
+  "RideCompletionValidator::unreachable-input": {
+    "first_seen": "2026-07-01T12:56:34.718746+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:56:34.718746+00:00",
+    "line": "\u2717 gate 'RideCompletionValidator': requires ['surge_zone_update'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'surge_zone_update' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideEstimator::dead-end-output": {
+    "first_seen": "2026-07-01T12:55:21.259671+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:55:21.259671+00:00",
+    "line": "\u2717 gate 'RideEstimator' outcome 'estimated': flow 'ride_estimate' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideEventRecorder::unreachable-input": {
+    "first_seen": "2026-07-01T12:54:02.002357+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:57:45.947281+00:00",
+    "line": "\u2717 gate 'RideEventRecorder': requires ['ride_event'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'ride_event' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 2
+  },
+  "RideIntake::dead-end-output": {
+    "first_seen": "2026-07-01T12:54:02.002359+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:54:02.002359+00:00",
+    "line": "\u2717 gate 'RideIntake' outcome 'rejected': flow 'rejected_ride' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideIntake::template-mismatch": {
+    "first_seen": "2026-07-01T13:26:40.051015+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T13:26:40.051015+00:00",
+    "line": "- gate 'RideIntake' claims gate_template 'order_intake', which requires input slot type(s) ['order'], but the instance's requires ['accepted_ride', 'rider_auth_token'] never covers this (or any subtype/supertype) \u2014 the gate template's actual contract isn't honored, only superficially referenced",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T132519Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RideIntake::unreachable-input": {
+    "first_seen": "2026-07-01T12:54:02.002340+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:54:02.002340+00:00",
+    "line": "\u2717 gate 'RideIntake': requires ['ride_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'ride_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RidePaymentProcessor::dead-end-output": {
+    "first_seen": "2026-07-01T12:54:02.002371+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954781+00:00",
+    "line": "\u2717 gate 'RidePaymentProcessor' outcome 'failed': flow 'ride_payment_failed' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 1,
+    "runs_fixed": [
+      "20260701T132519Z",
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z",
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 2,
+    "times_seen": 2
+  },
+  "RideRequestIntake::dead-end-output": {
+    "first_seen": "2026-07-01T13:35:20.954769+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954769+00:00",
+    "line": "\u2717 gate 'RideRequestIntake' outcome 'rejected': flow 'rejected_ride_request' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "SurgeInventoryIntake::dead-end-output": {
+    "first_seen": "2026-07-01T12:59:00.356433+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:59:00.356433+00:00",
+    "line": "\u2717 gate 'SurgeInventoryIntake' outcome 'applied': flow 'assignment_ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "SurgeInventoryIntake::template-mismatch": {
+    "first_seen": "2026-07-01T13:26:40.051030+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T13:26:40.051030+00:00",
+    "line": "- gate 'SurgeInventoryIntake' claims gate_template 'menu_manager', which requires input slot type(s) ['menu_update'], but the instance's requires ['rider_auth_token', 'surge_zone_update'] never covers this (or any subtype/supertype) \u2014 the gate template's actual contract isn't honored, only superficially referenced",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T132519Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "SurgePricingManager::template-mismatch": {
+    "first_seen": "2026-07-01T13:36:38.906938+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:36:38.906938+00:00",
+    "line": "- gate 'SurgePricingManager' claims gate_template 'menu_manager', which requires input slot type(s) ['menu_update'], but the instance's requires ['auth_token', 'surge_pricing_update'] never covers this (or any subtype/supertype) \u2014 the gate template's actual contract isn't honored, only superficially referenced",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "SurgeRateLimiter::unreachable-input": {
+    "first_seen": "2026-07-01T13:35:20.954756+00:00",
+    "last_fixed": "2026-07-01T13:40:23.959071+00:00",
+    "last_seen": "2026-07-01T13:35:20.954756+00:00",
+    "line": "\u2717 gate 'SurgeRateLimiter': requires ['ride_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'ride_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T133858Z"
+    ],
+    "runs_seen": [
+      "20260701T133407Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "SurgeZoneRegulator::dead-end-output": {
+    "first_seen": "2026-07-01T12:59:00.356418+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:59:00.356418+00:00",
+    "line": "\u2717 gate 'SurgeZoneRegulator' outcome 'allowed': flow 'accepted_ride' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "SurgeZoneRegulator::unreachable-input": {
+    "first_seen": "2026-07-01T12:55:21.259667+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T12:55:21.259667+00:00",
+    "line": "\u2717 gate 'SurgeZoneRegulator': requires ['ride_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'ride_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T125258Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "json-parse-error": {
+    "first_seen": "2026-07-01T13:28:38.109191+00:00",
+    "last_fixed": "2026-07-01T13:29:52.377485+00:00",
+    "last_seen": "2026-07-01T13:28:38.109191+00:00",
+    "line": "Your previous response could not be parsed as a single JSON object. Respond with ONLY the JSON object \u2014 no prose before or after it, and no markdown fence unless the fence wraps the entire JSON and nothing else.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260701T132519Z"
+    ],
+    "runs_seen": [
+      "20260701T132519Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  }
+}

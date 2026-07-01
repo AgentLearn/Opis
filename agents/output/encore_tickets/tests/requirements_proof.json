@@ -1,0 +1,344 @@
+[
+  {
+    "id": "REQ-1",
+    "text": "Customers can reserve seats for an event via mobile app or web \u2014 reservation orders are accepted through authenticated intake",
+    "target": {
+      "gate": "ReservationIntake",
+      "outcome": "accepted"
+    },
+    "status": "proved",
+    "proofs": {
+      "customer_auth_token": [
+        {
+          "node": "CustomerSentinel",
+          "pulse_type": "customer_auth_token",
+          "fired": "fired"
+        },
+        {
+          "node": "ReservationIntake",
+          "pulse_type": "customer_auth_token"
+        }
+      ],
+      "seat_reservation_order": [
+        {
+          "node": "Customer",
+          "pulse_type": "seat_reservation_order"
+        },
+        {
+          "node": "ReservationIntake",
+          "pulse_type": "seat_reservation_order"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  },
+  {
+    "id": "REQ-2",
+    "text": "Payment must be confirmed before a seat reservation is finalised \u2014 inventory validation requires confirmed payment",
+    "target": {
+      "gate": "InventoryValidator",
+      "outcome": "seat_available"
+    },
+    "status": "proved",
+    "proofs": {
+      "accepted_reservation_order": [
+        {
+          "node": "ReservationIntake",
+          "pulse_type": "accepted_reservation_order",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "accepted_reservation_order"
+        }
+      ],
+      "confirmed_ticket_payment": [
+        {
+          "node": "TicketPaymentProcessor",
+          "pulse_type": "confirmed_ticket_payment",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "confirmed_ticket_payment"
+        }
+      ],
+      "seat_inventory_update": [
+        {
+          "node": "InventoryReleaseManager",
+          "pulse_type": "seat_inventory_update",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryStore",
+          "pulse_type": "seat_inventory_update"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "seat_inventory_update"
+        }
+      ],
+      "venue_routing_decision": [
+        {
+          "node": "VenueRouter",
+          "pulse_type": "venue_routing_decision",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "venue_routing_decision"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  },
+  {
+    "id": "REQ-3",
+    "text": "Seat inventory must never be oversold \u2014 concurrent reservations are validated against remaining capacity via inventory state",
+    "target": {
+      "gate": "InventoryValidator",
+      "outcome": "seat_unavailable"
+    },
+    "status": "proved",
+    "proofs": {
+      "accepted_reservation_order": [
+        {
+          "node": "ReservationIntake",
+          "pulse_type": "accepted_reservation_order",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "accepted_reservation_order"
+        }
+      ],
+      "confirmed_ticket_payment": [
+        {
+          "node": "TicketPaymentProcessor",
+          "pulse_type": "confirmed_ticket_payment",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "confirmed_ticket_payment"
+        }
+      ],
+      "seat_inventory_update": [
+        {
+          "node": "InventoryReleaseManager",
+          "pulse_type": "seat_inventory_update",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryStore",
+          "pulse_type": "seat_inventory_update"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "seat_inventory_update"
+        }
+      ],
+      "venue_routing_decision": [
+        {
+          "node": "VenueRouter",
+          "pulse_type": "venue_routing_decision",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "venue_routing_decision"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  },
+  {
+    "id": "REQ-4",
+    "text": "Once payment is confirmed and a seat is reserved, the system issues a digital ticket to the customer",
+    "target": {
+      "gate": "TicketIssuer",
+      "outcome": "issued"
+    },
+    "status": "proved",
+    "proofs": {
+      "accepted_reservation_order": [
+        {
+          "node": "ReservationIntake",
+          "pulse_type": "accepted_reservation_order",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryValidator",
+          "pulse_type": "accepted_reservation_order"
+        },
+        {
+          "node": "TicketIssuer",
+          "pulse_type": "accepted_reservation_order"
+        }
+      ],
+      "venue_routing_decision": [
+        {
+          "node": "VenueRouter",
+          "pulse_type": "venue_routing_decision",
+          "fired": "fired"
+        },
+        {
+          "node": "TicketIssuer",
+          "pulse_type": "venue_routing_decision"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  },
+  {
+    "id": "REQ-5",
+    "text": "Event organisers can update event listings, pricing, and seat capacity independently",
+    "target": {
+      "gate": "EventListingManager",
+      "outcome": "listing_updated"
+    },
+    "status": "proved",
+    "proofs": {
+      "event_listing_update": [
+        {
+          "node": "Organiser",
+          "pulse_type": "event_listing_update"
+        },
+        {
+          "node": "EventListingManager",
+          "pulse_type": "event_listing_update"
+        }
+      ],
+      "organiser_auth_token": [
+        {
+          "node": "OrganiserSentinel",
+          "pulse_type": "organiser_auth_token",
+          "fired": "fired"
+        },
+        {
+          "node": "EventListingManager",
+          "pulse_type": "organiser_auth_token"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  },
+  {
+    "id": "REQ-6",
+    "text": "Customers can cancel a reservation and request a refund, releasing the seat back to available inventory",
+    "target": {
+      "gate": "InventoryReleaseManager",
+      "outcome": "seat_released"
+    },
+    "status": "proved",
+    "proofs": {
+      "event_listing_update": [
+        {
+          "node": "Organiser",
+          "pulse_type": "event_listing_update"
+        },
+        {
+          "node": "InventoryReleaseManager",
+          "pulse_type": "event_listing_update"
+        }
+      ],
+      "organiser_auth_token": [
+        {
+          "node": "OrganiserSentinel",
+          "pulse_type": "organiser_auth_token",
+          "fired": "fired"
+        },
+        {
+          "node": "InventoryReleaseManager",
+          "pulse_type": "organiser_auth_token"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  },
+  {
+    "id": "REQ-7",
+    "text": "The platform tracks loyalty points for frequent attendees and applies rewards at checkout",
+    "target": {
+      "gate": "LoyaltyProcessor",
+      "outcome": "points_awarded"
+    },
+    "status": "proved",
+    "proofs": {
+      "confirmed_ticket_payment": [
+        {
+          "node": "TicketPaymentProcessor",
+          "pulse_type": "confirmed_ticket_payment",
+          "fired": "fired"
+        },
+        {
+          "node": "LoyaltyProcessor",
+          "pulse_type": "confirmed_ticket_payment"
+        }
+      ],
+      "customer_auth_token": [
+        {
+          "node": "LoyaltySentinel",
+          "pulse_type": "customer_auth_token",
+          "fired": "fired"
+        },
+        {
+          "node": "LoyaltyProcessor",
+          "pulse_type": "customer_auth_token"
+        }
+      ],
+      "loyalty_reward": [
+        {
+          "node": "Customer",
+          "pulse_type": "loyalty_reward"
+        },
+        {
+          "node": "LoyaltyProcessor",
+          "pulse_type": "loyalty_reward"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  },
+  {
+    "id": "REQ-8",
+    "text": "Customers can request a refund before event start time \u2014 refund payments are processed via authenticated payment processor",
+    "target": {
+      "gate": "RefundProcessor",
+      "outcome": "refund_confirmed"
+    },
+    "status": "proved",
+    "proofs": {
+      "customer_auth_token": [
+        {
+          "node": "RefundAuthSentinel",
+          "pulse_type": "customer_auth_token",
+          "fired": "fired"
+        },
+        {
+          "node": "RefundProcessor",
+          "pulse_type": "customer_auth_token"
+        }
+      ],
+      "refund_payment": [
+        {
+          "node": "Customer",
+          "pulse_type": "refund_payment"
+        },
+        {
+          "node": "RefundProcessor",
+          "pulse_type": "refund_payment"
+        }
+      ]
+    },
+    "issues": [],
+    "notes": []
+  }
+]

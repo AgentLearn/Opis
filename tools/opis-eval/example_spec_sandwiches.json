@@ -1,0 +1,141 @@
+{
+  "comment": "Silicon Sandwiches — demonstrates cardinality (check 8) and topology_groups / slot isolation (check 9).",
+
+  "loci": {
+    "customer":         {"description": "External customer — online order injection point"},
+    "shop_location": {
+      "description": "Franchise shop — processes orders",
+      "cardinality": {
+        "count": 10,
+        "per_instance": ["local_queue", "local_inventory"],
+        "shared":       ["payment_gateway", "national_menu", "mapping_api"]
+      },
+      "detail": "shop_detail"
+    },
+    "local_queue":      {"description": "Per-shop order queue (one per instance)"},
+    "local_inventory":  {"description": "Per-shop ingredient stock (one per instance)"},
+    "payment_gateway":  {"description": "Shared payment processor — scaling ceiling"},
+    "national_menu":    {"description": "Shared menu — franchise overrides applied locally"},
+    "mapping_api":      {"description": "Shared external mapping (Google Maps / HERE)"},
+    "driver_pool":      {"description": "Delivery driver fleet — optional path"}
+  },
+
+  "archetypes": {
+    "order_pulse":      {"description": "Customer order payload"},
+    "payment_pulse":    {"description": "Payment confirmation payload"},
+    "delivery_pulse":   {"description": "Delivery assignment payload"}
+  },
+
+  "gates": {
+    "payment_gate": {
+      "kind":           "sentinel",
+      "requires":       ["order_pulse"],
+      "window_ms":      5000,
+      "refractory_ms":  50,
+      "emits":          ["payment_pulse"],
+      "description":    "Confirms payment before order reaches kitchen"
+    },
+    "route_gate": {
+      "kind":           "gate",
+      "requires":       ["payment_pulse", "order_pulse"],
+      "window_ms":      2000,
+      "refractory_ms":  10,
+      "emits":          ["routed_order"],
+      "description":    "Routes paid order to nearest shop location"
+    },
+    "kitchen_gate": {
+      "kind":           "gate",
+      "requires":       ["routed_order"],
+      "window_ms":      30000,
+      "refractory_ms":  500,
+      "emits":          ["order_ready"],
+      "description":    "Order enters kitchen queue — bounded by slot capacity"
+    },
+    "pickup_gate": {
+      "kind":           "gate",
+      "requires":       ["order_ready"],
+      "window_ms":      600000,
+      "refractory_ms":  0,
+      "emits":          ["order_complete"],
+      "description":    "Customer collects order"
+    },
+    "delivery_gate": {
+      "kind":           "gate",
+      "requires":       ["order_ready", "delivery_pulse"],
+      "window_ms":      60000,
+      "refractory_ms":  100,
+      "emits":          ["order_complete"],
+      "description":    "Driver collects and delivers — optional path"
+    },
+    "eta_gate": {
+      "kind":           "gate",
+      "requires":       ["routed_order"],
+      "window_ms":      1000,
+      "refractory_ms":  0,
+      "emits":          ["eta_pulse"],
+      "description":    "Estimates pickup time from queue length + mapping API"
+    }
+  },
+
+  "synapses": [
+    {"from": "customer",        "to": "payment_gate",  "pulse_type": "order_pulse"},
+    {"from": "customer",        "to": "route_gate",    "pulse_type": "order_pulse"},
+    {"from": "payment_gateway", "to": "payment_gate",  "pulse_type": "order_pulse"},
+    {"from": "payment_gate",    "to": "route_gate",    "pulse_type": "payment_pulse"},
+    {"from": "national_menu",   "to": "route_gate",    "pulse_type": "order_pulse"},
+    {"from": "route_gate",      "to": "kitchen_gate",  "pulse_type": "routed_order"},
+    {"from": "route_gate",      "to": "eta_gate",      "pulse_type": "routed_order"},
+    {"from": "kitchen_gate",    "to": "pickup_gate",   "pulse_type": "order_ready"},
+    {"from": "kitchen_gate",    "to": "delivery_gate", "pulse_type": "order_ready"},
+    {"from": "driver_pool",     "to": "delivery_gate", "pulse_type": "delivery_pulse"}
+  ],
+
+  "topology_groups": {
+    "shop_detail": {
+      "description": "Slot-level view of one shop location — 3 concurrent in-flight orders",
+      "slots":       ["slot_active", "slot_stalled", "slot_next"],
+      "shared_loci": ["prep_station"],
+      "loci": {
+        "slot_active":  {"description": "Order currently being assembled"},
+        "slot_stalled": {"description": "Order blocked — missing ingredient; may be preempted"},
+        "slot_next":    {"description": "Next order waiting to enter active slot"},
+        "prep_station": {"description": "Shared prep counter — all slots contend for it; bottleneck"}
+      },
+      "gates": {
+        "advance_gate": {
+          "kind":           "gate",
+          "requires":       ["order_complete", "slot_next_ready"],
+          "window_ms":      5000,
+          "refractory_ms":  100,
+          "emits":          ["slot_advanced"],
+          "description":    "Coincidence: active order done AND next is ready → advance queue"
+        },
+        "stall_gate": {
+          "kind":           "gate",
+          "requires":       ["missing_ingredient"],
+          "window_ms":      1000,
+          "refractory_ms":  0,
+          "emits":          ["slot_stalled_event"],
+          "description":    "Active order blocked on ingredient → move to stalled slot"
+        },
+        "prep_assign_gate": {
+          "kind":           "gate",
+          "requires":       ["slot_advanced", "prep_ready"],
+          "window_ms":      2000,
+          "refractory_ms":  50,
+          "emits":          ["prep_assigned"],
+          "description":    "After queue advance, claim prep station for new active order"
+        }
+      },
+      "synapses": [
+        {"from": "slot_active",     "to": "advance_gate",    "pulse_type": "order_complete"},
+        {"from": "slot_next",       "to": "advance_gate",    "pulse_type": "slot_next_ready"},
+        {"from": "slot_active",     "to": "stall_gate",      "pulse_type": "missing_ingredient"},
+        {"from": "advance_gate",    "to": "prep_assign_gate","pulse_type": "slot_advanced"},
+        {"from": "prep_station",    "to": "prep_assign_gate","pulse_type": "prep_ready"},
+        {"from": "prep_station",    "to": "slot_active",     "pulse_type": "prep_ready"},
+        {"from": "prep_station",    "to": "slot_stalled",    "pulse_type": "prep_ready"}
+      ]
+    }
+  }
+}

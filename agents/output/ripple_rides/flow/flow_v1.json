@@ -1,0 +1,938 @@
+{
+  "name": "ripple_rides",
+  "version": 1,
+  "description": "On-demand ride-hailing platform connecting riders with nearby drivers in real time",
+  "archetypes": {
+    "ride_request": {
+      "extends": "order",
+      "description": "A rider's request for a ride specifying pickup and destination"
+    },
+    "accepted_ride": {
+      "extends": "accepted_order",
+      "description": "A ride request that passed intake validation"
+    },
+    "rejected_ride": {
+      "extends": "rejected_order",
+      "description": "A ride request that failed intake validation"
+    },
+    "rider_auth_request": {
+      "extends": "auth_request",
+      "description": "Authentication request from a rider"
+    },
+    "driver_auth_request": {
+      "extends": "auth_request",
+      "description": "Authentication request from a driver"
+    },
+    "rider_auth_token": {
+      "extends": "auth_token",
+      "description": "Auth token for a rider"
+    },
+    "driver_auth_token": {
+      "extends": "auth_token",
+      "description": "Auth token for a driver"
+    },
+    "pickup_location": {
+      "extends": "location",
+      "description": "The pickup location for a ride"
+    },
+    "ride_routing_decision": {
+      "extends": "routing_decision",
+      "description": "Routing decision identifying nearby driver candidates"
+    },
+    "surge_routing_decision": {
+      "extends": "routing_decision",
+      "description": "Routing decision for surge zone regulation"
+    },
+    "ride_estimate": {
+      "extends": "estimate",
+      "description": "Estimated time and cost for a ride"
+    },
+    "driver_assignment_command": {
+      "extends": "command",
+      "description": "Command dispatching a ride assignment to a driver"
+    },
+    "assignment_ack": {
+      "extends": "ack",
+      "description": "Acknowledgement that a driver assignment was received"
+    },
+    "driver_tracking": {
+      "extends": "tracking_update",
+      "description": "Real-time driver position or status update"
+    },
+    "ride_event": {
+      "extends": "event",
+      "description": "A fact about a ride lifecycle event (completed, cancelled, etc.)"
+    },
+    "driver_no_accept_event": {
+      "extends": "event",
+      "description": "Event recording that a driver failed to accept an assigned ride"
+    },
+    "late_cancellation_event": {
+      "extends": "event",
+      "description": "Event recording that a rider performed a late cancellation"
+    },
+    "ride_payment": {
+      "extends": "payment",
+      "description": "Payment for a completed ride"
+    },
+    "ride_payment_confirmed": {
+      "extends": "payment_confirmed",
+      "description": "Confirmed payment for a completed ride"
+    },
+    "ride_payment_failed": {
+      "extends": "payment_failed",
+      "description": "Failed payment for a ride"
+    },
+    "surge_zone_update": {
+      "extends": "inventory_update",
+      "description": "Update to surge pricing and zone demand state"
+    },
+    "driver_suspension_command": {
+      "extends": "command",
+      "description": "Command suspending new assignments to a repeatedly non-accepting driver"
+    },
+    "rider_cooldown_command": {
+      "extends": "command",
+      "description": "Command placing a rider into cooldown after repeated late cancellations"
+    },
+    "rating_event": {
+      "extends": "event",
+      "description": "Event recording a rating for rider or driver after ride completion"
+    },
+    "rider_notification": {
+      "extends": "notification",
+      "description": "Outbound notification sent to a rider"
+    },
+    "validated_ride": {
+      "extends": "accepted_order",
+      "description": "A ride order validated with payment confirmation before completion"
+    }
+  },
+  "loci": {
+    "RiderApp": {
+      "description": "Mobile app used by riders to request and manage rides",
+      "source": true
+    },
+    "DriverApp": {
+      "description": "Mobile app used by drivers to receive and accept ride assignments",
+      "source": true
+    },
+    "ZoneMonitor": {
+      "description": "Service monitoring zone demand and emitting surge zone updates",
+      "source": true
+    },
+    "NotificationService": {
+      "description": "Downstream service sending notifications to riders and drivers",
+      "source": false
+    },
+    "RatingStore": {
+      "description": "Persistent store recording rider and driver ratings",
+      "source": false
+    },
+    "PaymentGateway": {
+      "description": "External payment processor",
+      "source": false
+    }
+  },
+  "gates": {
+    "RiderAuthSentinel": {
+      "gate_template": "sentinel_auth",
+      "kind": "sentinel",
+      "requires": [
+        "rider_auth_request"
+      ],
+      "emits": [
+        {
+          "outcome": "authenticated",
+          "flows": [
+            "rider_auth_token"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "DriverAuthSentinel": {
+      "gate_template": "sentinel_auth",
+      "kind": "sentinel",
+      "requires": [
+        "driver_auth_request"
+      ],
+      "emits": [
+        {
+          "outcome": "authenticated",
+          "flows": [
+            "driver_auth_token"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "RideRouter": {
+      "gate_template": "delivery_router",
+      "kind": "gate",
+      "requires": [
+        "ride_request",
+        "pickup_location"
+      ],
+      "emits": [
+        {
+          "outcome": "routed",
+          "flows": [
+            "ride_routing_decision"
+          ]
+        }
+      ],
+      "window_ms": 3000,
+      "auth_required": false
+    },
+    "SurgeRouter": {
+      "gate_template": "delivery_router",
+      "kind": "gate",
+      "requires": [
+        "ride_request",
+        "pickup_location"
+      ],
+      "emits": [
+        {
+          "outcome": "surge_routed",
+          "flows": [
+            "surge_routing_decision"
+          ]
+        }
+      ],
+      "window_ms": 3000,
+      "auth_required": false
+    },
+    "SurgeZoneRegulator": {
+      "gate_template": "zone_regulator",
+      "kind": "regulator",
+      "requires": [
+        "ride_request",
+        "surge_routing_decision"
+      ],
+      "emits": [
+        {
+          "outcome": "allowed",
+          "flows": [
+            "accepted_ride"
+          ]
+        },
+        {
+          "outcome": "rate_limited",
+          "flows": [
+            "rejected_ride"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "RideIntake": {
+      "gate_template": "order_intake",
+      "kind": "gate",
+      "requires": [
+        "ride_request",
+        "rider_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "accepted",
+          "flows": [
+            "accepted_ride"
+          ]
+        },
+        {
+          "outcome": "rejected",
+          "flows": [
+            "rejected_ride"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": true
+    },
+    "RideEstimator": {
+      "gate_template": "pickup_estimator",
+      "kind": "gate",
+      "requires": [
+        "accepted_ride",
+        "pickup_location"
+      ],
+      "emits": [
+        {
+          "outcome": "estimated",
+          "flows": [
+            "ride_estimate"
+          ]
+        }
+      ],
+      "window_ms": 3000,
+      "auth_required": false
+    },
+    "DriverDispatcher": {
+      "gate_template": "driver_dispatcher",
+      "kind": "gate",
+      "requires": [
+        "accepted_ride",
+        "ride_routing_decision",
+        "driver_tracking"
+      ],
+      "emits": [
+        {
+          "outcome": "dispatched",
+          "flows": [
+            "driver_assignment_command"
+          ]
+        },
+        {
+          "outcome": "tracking_updated",
+          "flows": [
+            "driver_tracking"
+          ]
+        },
+        {
+          "outcome": "no_accept",
+          "flows": [
+            "driver_no_accept_event"
+          ]
+        }
+      ],
+      "window_ms": 15000,
+      "auth_required": true
+    },
+    "ReassignmentDispatcher": {
+      "gate_template": "driver_dispatcher",
+      "kind": "gate",
+      "requires": [
+        "accepted_ride",
+        "ride_routing_decision",
+        "driver_tracking"
+      ],
+      "emits": [
+        {
+          "outcome": "reassigned",
+          "flows": [
+            "driver_assignment_command"
+          ]
+        },
+        {
+          "outcome": "tracking_updated",
+          "flows": [
+            "driver_tracking"
+          ]
+        },
+        {
+          "outcome": "no_accept",
+          "flows": [
+            "driver_no_accept_event"
+          ]
+        }
+      ],
+      "window_ms": 15000,
+      "auth_required": true
+    },
+    "NoAcceptThrottle": {
+      "gate_template": "repeat_event_throttle",
+      "kind": "regulator",
+      "requires": [
+        "driver_no_accept_event"
+      ],
+      "emits": [
+        {
+          "outcome": "threshold_exceeded",
+          "flows": [
+            "driver_suspension_command"
+          ]
+        },
+        {
+          "outcome": "below_threshold",
+          "flows": [
+            "assignment_ack"
+          ]
+        }
+      ],
+      "window_ms": 60000,
+      "auth_required": false
+    },
+    "CancellationThrottle": {
+      "gate_template": "repeat_event_throttle",
+      "kind": "regulator",
+      "requires": [
+        "late_cancellation_event"
+      ],
+      "emits": [
+        {
+          "outcome": "threshold_exceeded",
+          "flows": [
+            "rider_cooldown_command"
+          ]
+        },
+        {
+          "outcome": "below_threshold",
+          "flows": [
+            "assignment_ack"
+          ]
+        }
+      ],
+      "window_ms": 86400000,
+      "auth_required": false
+    },
+    "RideCompletionValidator": {
+      "gate_template": "order_validator",
+      "kind": "gate",
+      "requires": [
+        "accepted_ride",
+        "ride_payment_confirmed",
+        "surge_zone_update",
+        "ride_routing_decision"
+      ],
+      "emits": [
+        {
+          "outcome": "completed",
+          "flows": [
+            "validated_ride"
+          ]
+        },
+        {
+          "outcome": "rejected",
+          "flows": [
+            "rejected_ride"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    },
+    "RidePaymentProcessor": {
+      "gate_template": "payment_processor",
+      "kind": "gate",
+      "requires": [
+        "ride_payment",
+        "rider_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "confirmed",
+          "flows": [
+            "ride_payment_confirmed"
+          ]
+        },
+        {
+          "outcome": "failed",
+          "flows": [
+            "ride_payment_failed"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    },
+    "RideEventRecorder": {
+      "gate_template": "event_recorder",
+      "kind": "gate",
+      "requires": [
+        "ride_event",
+        "rider_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "recorded",
+          "flows": [
+            "assignment_ack"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "RatingRecorder": {
+      "gate_template": "event_recorder",
+      "kind": "gate",
+      "requires": [
+        "rating_event",
+        "rider_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "recorded",
+          "flows": [
+            "assignment_ack"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    }
+  },
+  "synapses": [
+    {
+      "from": "RiderApp",
+      "to": "RiderAuthSentinel",
+      "pulse_type": "rider_auth_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverApp",
+      "to": "DriverAuthSentinel",
+      "pulse_type": "driver_auth_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "RideRouter",
+      "pulse_type": "ride_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "RideRouter",
+      "pulse_type": "pickup_location",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "SurgeRouter",
+      "pulse_type": "ride_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "SurgeRouter",
+      "pulse_type": "pickup_location",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "SurgeZoneRegulator",
+      "pulse_type": "ride_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "SurgeRouter",
+      "to": "SurgeZoneRegulator",
+      "pulse_type": "surge_routing_decision",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "RideIntake",
+      "pulse_type": "ride_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderAuthSentinel",
+      "to": "RideIntake",
+      "pulse_type": "rider_auth_token",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "SurgeZoneRegulator",
+      "to": "RideEstimator",
+      "pulse_type": "accepted_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "RideEstimator",
+      "pulse_type": "pickup_location",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RideEstimator",
+      "to": "NotificationService",
+      "pulse_type": "ride_estimate",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideIntake",
+      "to": "NotificationService",
+      "pulse_type": "rejected_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "SurgeZoneRegulator",
+      "to": "NotificationService",
+      "pulse_type": "rejected_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideIntake",
+      "to": "DriverDispatcher",
+      "pulse_type": "accepted_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideRouter",
+      "to": "DriverDispatcher",
+      "pulse_type": "ride_routing_decision",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverApp",
+      "to": "DriverDispatcher",
+      "pulse_type": "driver_tracking",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverAuthSentinel",
+      "to": "DriverDispatcher",
+      "pulse_type": "driver_auth_token",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverDispatcher",
+      "to": "DriverApp",
+      "pulse_type": "driver_assignment_command",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverDispatcher",
+      "to": "DriverDispatcher",
+      "pulse_type": "driver_tracking",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverDispatcher",
+      "to": "NoAcceptThrottle",
+      "pulse_type": "driver_no_accept_event",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverDispatcher",
+      "to": "ReassignmentDispatcher",
+      "pulse_type": "driver_no_accept_event",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideIntake",
+      "to": "ReassignmentDispatcher",
+      "pulse_type": "accepted_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideRouter",
+      "to": "ReassignmentDispatcher",
+      "pulse_type": "ride_routing_decision",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverApp",
+      "to": "ReassignmentDispatcher",
+      "pulse_type": "driver_tracking",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverAuthSentinel",
+      "to": "ReassignmentDispatcher",
+      "pulse_type": "driver_auth_token",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "ReassignmentDispatcher",
+      "to": "DriverApp",
+      "pulse_type": "driver_assignment_command",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "ReassignmentDispatcher",
+      "to": "ReassignmentDispatcher",
+      "pulse_type": "driver_tracking",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "ReassignmentDispatcher",
+      "to": "NoAcceptThrottle",
+      "pulse_type": "driver_no_accept_event",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "NoAcceptThrottle",
+      "to": "DriverApp",
+      "pulse_type": "driver_suspension_command",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "NoAcceptThrottle",
+      "to": "NotificationService",
+      "pulse_type": "assignment_ack",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "CancellationThrottle",
+      "pulse_type": "late_cancellation_event",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "CancellationThrottle",
+      "to": "NotificationService",
+      "pulse_type": "rider_cooldown_command",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "CancellationThrottle",
+      "to": "NotificationService",
+      "pulse_type": "assignment_ack",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "RidePaymentProcessor",
+      "pulse_type": "ride_payment",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderAuthSentinel",
+      "to": "RidePaymentProcessor",
+      "pulse_type": "rider_auth_token",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RidePaymentProcessor",
+      "to": "PaymentGateway",
+      "pulse_type": "ride_payment_confirmed",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RidePaymentProcessor",
+      "to": "NotificationService",
+      "pulse_type": "ride_payment_failed",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RidePaymentProcessor",
+      "to": "RideCompletionValidator",
+      "pulse_type": "ride_payment_confirmed",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideIntake",
+      "to": "RideCompletionValidator",
+      "pulse_type": "accepted_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "ZoneMonitor",
+      "to": "RideCompletionValidator",
+      "pulse_type": "surge_zone_update",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideRouter",
+      "to": "RideCompletionValidator",
+      "pulse_type": "ride_routing_decision",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderAuthSentinel",
+      "to": "RideCompletionValidator",
+      "pulse_type": "rider_auth_token",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideCompletionValidator",
+      "to": "RideEventRecorder",
+      "pulse_type": "validated_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideCompletionValidator",
+      "to": "NotificationService",
+      "pulse_type": "rejected_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideCompletionValidator",
+      "to": "RatingRecorder",
+      "pulse_type": "validated_ride",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RideCompletionValidator",
+      "to": "RideEventRecorder",
+      "pulse_type": "ride_event",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderAuthSentinel",
+      "to": "RideEventRecorder",
+      "pulse_type": "rider_auth_token",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "RideEventRecorder",
+      "pulse_type": "ride_event",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RideEventRecorder",
+      "to": "RatingStore",
+      "pulse_type": "assignment_ack",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderApp",
+      "to": "RatingRecorder",
+      "pulse_type": "rating_event",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "DriverApp",
+      "to": "RatingRecorder",
+      "pulse_type": "rating_event",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RiderAuthSentinel",
+      "to": "RatingRecorder",
+      "pulse_type": "rider_auth_token",
+      "medium": "lan",
+      "interaction": "push"
+    },
+    {
+      "from": "RatingRecorder",
+      "to": "RatingStore",
+      "pulse_type": "assignment_ack",
+      "medium": "lan",
+      "interaction": "push"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "text": "Riders request a ride via mobile app specifying pickup and destination; the request is authenticated and ingested",
+      "target": {
+        "gate": "RideIntake",
+        "outcome": "accepted"
+      }
+    },
+    {
+      "id": "REQ-2",
+      "text": "Each ride request is matched against multiple nearby drivers simultaneously using routing and dispatcher",
+      "target": {
+        "gate": "DriverDispatcher",
+        "outcome": "dispatched"
+      }
+    },
+    {
+      "id": "REQ-3",
+      "text": "If no matched driver accepts within a short window, the platform automatically reassigns to next best driver",
+      "target": {
+        "gate": "ReassignmentDispatcher",
+        "outcome": "reassigned"
+      }
+    },
+    {
+      "id": "REQ-4",
+      "text": "During high demand, surge pricing is applied and new ride requests per zone are rate-limited",
+      "target": {
+        "gate": "SurgeZoneRegulator",
+        "outcome": "rate_limited"
+      }
+    },
+    {
+      "id": "REQ-5",
+      "text": "Surge zone allows rides through when demand is within limits",
+      "target": {
+        "gate": "SurgeZoneRegulator",
+        "outcome": "allowed"
+      }
+    },
+    {
+      "id": "REQ-6",
+      "text": "Payment must be confirmed before a ride can be marked complete",
+      "target": {
+        "gate": "RideCompletionValidator",
+        "outcome": "completed"
+      }
+    },
+    {
+      "id": "REQ-7",
+      "text": "Payment is processed and confirmed before ride completion can proceed",
+      "target": {
+        "gate": "RidePaymentProcessor",
+        "outcome": "confirmed"
+      }
+    },
+    {
+      "id": "REQ-8",
+      "text": "If a driver repeatedly fails to accept assigned rides, they are temporarily suspended from new assignments",
+      "target": {
+        "gate": "NoAcceptThrottle",
+        "outcome": "threshold_exceeded"
+      }
+    },
+    {
+      "id": "REQ-9",
+      "text": "Once a ride is completed, a rating event is recorded for both rider and driver",
+      "target": {
+        "gate": "RatingRecorder",
+        "outcome": "recorded"
+      }
+    },
+    {
+      "id": "REQ-10",
+      "text": "Riders can cancel a requested ride; repeated late cancellations trigger a cooldown restricting new ride requests",
+      "target": {
+        "gate": "CancellationThrottle",
+        "outcome": "threshold_exceeded"
+      }
+    }
+  ]
+}

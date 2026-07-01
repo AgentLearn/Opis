@@ -1,0 +1,389 @@
+{
+  "CancellationIntake::dead-end-output": {
+    "first_seen": "2026-06-30T22:16:22.900847+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:16:22.900847+00:00",
+    "line": "\u2717 gate 'CancellationIntake' outcome 'accepted': flow 'accepted_order' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "CancellationProcessor::unreachable-input": {
+    "first_seen": "2026-06-30T21:50:45.231428+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:50:45.231428+00:00",
+    "line": "\u2717 gate 'CancellationProcessor': requires ['reservation_routing'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "EventListingManager::dead-end-output": {
+    "first_seen": "2026-06-30T21:48:08.627783+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:48:08.627783+00:00",
+    "line": "\u2717 gate 'EventListingManager' outcome 'listing_updated': flow 'cancellation_ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "InventoryReleaseManager::unreachable-input": {
+    "first_seen": "2026-06-30T22:16:22.900845+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:16:22.900845+00:00",
+    "line": "\u2717 gate 'InventoryReleaseManager': requires ['event_listing_update'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'event_listing_update' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "InventoryRouter::unreachable-input": {
+    "first_seen": "2026-06-30T21:49:11.949533+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:16:22.900816+00:00",
+    "line": "\u2717 gate 'InventoryRouter': requires ['order'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'order' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z",
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 2
+  },
+  "InventoryValidator::dead-end-output": {
+    "first_seen": "2026-06-30T21:48:08.627771+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:48:08.627771+00:00",
+    "line": "\u2717 gate 'InventoryValidator' outcome 'seat_unavailable': flow 'rejected_reservation' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "InventoryValidator::unreachable-input": {
+    "first_seen": "2026-06-30T21:50:45.231420+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:50:45.231420+00:00",
+    "line": "\u2717 gate 'InventoryValidator': requires ['reservation_routing'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "LoyaltyProcessor::dead-end-output": {
+    "first_seen": "2026-06-30T21:48:08.627782+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:48:08.627782+00:00",
+    "line": "\u2717 gate 'LoyaltyProcessor' outcome 'points_awarded': flow 'loyalty_reward' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "LoyaltySentinel::unreachable-input": {
+    "first_seen": "2026-06-30T21:48:08.627752+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:16:22.900838+00:00",
+    "line": "\u2717 gate 'LoyaltySentinel': requires ['auth_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'auth_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z",
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 2
+  },
+  "RefundAuthSentinel::unreachable-input": {
+    "first_seen": "2026-06-30T22:16:22.900841+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:16:22.900841+00:00",
+    "line": "\u2717 gate 'RefundAuthSentinel': requires ['auth_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'auth_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RefundProcessor::template-mismatch": {
+    "first_seen": "2026-06-30T22:09:06.070974+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:09:06.070974+00:00",
+    "line": "- gate 'RefundProcessor' claims gate_template 'payment_processor', which requires input slot type(s) ['payment'], but the instance's requires ['auth_token', 'confirmed_ticket_payment'] never covers this (or any subtype/supertype) \u2014 the gate template's actual contract isn't honored, only superficially referenced",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T220750Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "RefundProcessor::unreachable-input": {
+    "first_seen": "2026-06-30T21:52:45.762713+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:52:45.762713+00:00",
+    "line": "\u2717 gate 'RefundProcessor': requires ['refund_payment'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "ReservationFinalizer::dead-end-output": {
+    "first_seen": "2026-06-30T21:48:08.627776+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:48:08.627776+00:00",
+    "line": "\u2717 gate 'ReservationFinalizer' outcome 'reservation_failed': flow 'rejected_reservation' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "ReservationIntake::dead-end-output": {
+    "first_seen": "2026-06-30T21:48:08.627767+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:48:08.627767+00:00",
+    "line": "\u2717 gate 'ReservationIntake' outcome 'rejected': flow 'rejected_reservation' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "ReservationRouter::dead-end-output": {
+    "first_seen": "2026-06-30T21:50:45.231430+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:50:45.231430+00:00",
+    "line": "\u2717 gate 'ReservationRouter' outcome 'routed': flow 'reservation_routing' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "ReservationRouter::unreachable-input": {
+    "first_seen": "2026-06-30T21:50:45.231403+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:50:45.231403+00:00",
+    "line": "\u2717 gate 'ReservationRouter': requires ['location', 'seat_reservation'] but no upstream path produces these types (or any subtype) \u2014 gate can never fire",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "TicketIssuanceRouter::unreachable-input": {
+    "first_seen": "2026-06-30T21:51:46.040925+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:51:46.040925+00:00",
+    "line": "\u2717 gate 'TicketIssuanceRouter': requires ['seat_reservation'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "TicketIssuer::dead-end-output": {
+    "first_seen": "2026-06-30T21:48:08.627779+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:48:08.627779+00:00",
+    "line": "\u2717 gate 'TicketIssuer' outcome 'issuance_acked': flow 'cancellation_ack' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "TicketIssuer::unreachable-input": {
+    "first_seen": "2026-06-30T21:49:11.949549+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:51:46.040927+00:00",
+    "line": "\u2717 gate 'TicketIssuer': requires ['confirmed_reservation'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 3
+  },
+  "TicketPaymentProcessor::dead-end-output": {
+    "first_seen": "2026-06-30T21:48:08.627774+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:48:08.627774+00:00",
+    "line": "\u2717 gate 'TicketPaymentProcessor' outcome 'payment_failed': flow 'failed_ticket_payment' has no consuming synapse \u2014 silently dropped",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "TicketPaymentProcessor::unreachable-input": {
+    "first_seen": "2026-06-30T21:51:46.040922+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T21:51:46.040922+00:00",
+    "line": "\u2717 gate 'TicketPaymentProcessor': requires ['ticket_payment'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "TicketPaymentSentinel::unreachable-input": {
+    "first_seen": "2026-06-30T21:51:46.040906+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:16:22.900834+00:00",
+    "line": "\u2717 gate 'TicketPaymentSentinel': requires ['auth_request'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'auth_request' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T214720Z",
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 2
+  },
+  "VenueRouter::unreachable-input": {
+    "first_seen": "2026-06-30T22:14:36.316099+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:14:36.316099+00:00",
+    "line": "\u2717 gate 'VenueRouter': requires ['venue_location'] but no upstream path produces this type (or any subtype) \u2014 gate can never fire\n      'venue_location' is produced elsewhere in this flow, just not wired to this gate \u2014 add a synapse.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  },
+  "json-parse-error": {
+    "first_seen": "2026-06-30T22:18:28.758798+00:00",
+    "last_fixed": "2026-06-30T22:19:32.551322+00:00",
+    "last_seen": "2026-06-30T22:18:28.758798+00:00",
+    "line": "Your previous response could not be parsed as a single JSON object. Respond with ONLY the JSON object \u2014 no prose before or after it, and no markdown fence unless the fence wraps the entire JSON and nothing else.",
+    "reopened_count": 0,
+    "runs_fixed": [
+      "20260630T221333Z"
+    ],
+    "runs_seen": [
+      "20260630T221333Z"
+    ],
+    "status": "fixed",
+    "times_fixed": 1,
+    "times_seen": 1
+  }
+}

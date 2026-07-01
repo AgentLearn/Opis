@@ -1,0 +1,99 @@
+{
+  "comment": "Example Opis pulse network for opis-eval smoke-test. Exercises all 7 checks.",
+
+  "loci": {
+    "client":        {"description": "External client — injection point"},
+    "auth_service":  {"description": "Authentication service"},
+    "order_service": {"description": "Order processing service"},
+    "notify":        {"description": "Notification dispatcher"},
+    "orphan_locus":  {"description": "Orphaned locus — no synapses (check 2)"}
+  },
+
+  "archetypes": {
+    "request":  {"description": "Typed request pulse"},
+    "response": {"description": "Typed response pulse"}
+  },
+
+  "gates": {
+    "authn_gate": {
+      "kind":        "sentinel",
+      "requires":    ["raw_request"],
+      "window_ms":   500,
+      "refractory_ms": 10,
+      "emits":       ["authn_token"],
+      "description": "Authenticates inbound request"
+    },
+    "authz_gate": {
+      "kind":        "sentinel",
+      "requires":    ["authn_token", "order_request"],
+      "window_ms":   200,
+      "refractory_ms": 10,
+      "emits":       ["authz_grant"],
+      "description": "Authorises order against entitlements"
+    },
+    "order_gate": {
+      "kind":        "gate",
+      "requires":    ["authz_grant", "order_request"],
+      "window_ms":   1000,
+      "refractory_ms": 50,
+      "emits":       ["order_accepted"],
+      "description": "Processes order when authorised"
+    },
+    "notify_gate": {
+      "kind":        "gate",
+      "requires":    ["order_accepted"],
+      "window_ms":   5000,
+      "refractory_ms": 0,
+      "emits":       [],
+      "description": "Sends notification — intentional sink (check 6)"
+    },
+    "feedback_gate": {
+      "kind":        "gate",
+      "requires":    ["order_accepted"],
+      "window_ms":   2000,
+      "refractory_ms": 100,
+      "emits":       ["feedback_pulse"],
+      "description": "Feeds back into order_service to trigger reconciliation (check 3 — cycle)"
+    },
+    "unprotected_gate": {
+      "kind":        "gate",
+      "requires":    ["raw_request"],
+      "window_ms":   300,
+      "refractory_ms": 0,
+      "emits":       ["internal_event"],
+      "description": "Gate with no sentinel in requires — security gap (check 5)"
+    },
+    "deep_gate": {
+      "kind":        "gate",
+      "requires":    ["internal_event"],
+      "window_ms":   1,
+      "refractory_ms": 0,
+      "emits":       ["deep_signal"],
+      "description": "Very tight window_ms=1 deep in chain — feasibility warning (check 7)"
+    },
+    "unreachable_gate": {
+      "kind":        "gate",
+      "requires":    ["ghost_pulse"],
+      "window_ms":   500,
+      "refractory_ms": 0,
+      "emits":       ["ghost_out"],
+      "description": "Requires ghost_pulse which no upstream produces — dead gate (check 1)"
+    }
+  },
+
+  "synapses": [
+    {"from": "client",        "to": "authn_gate",      "pulse_type": "raw_request"},
+    {"from": "client",        "to": "order_service",   "pulse_type": "order_request"},
+    {"from": "auth_service",  "to": "authn_gate",      "pulse_type": "raw_request"},
+    {"from": "authn_gate",    "to": "authz_gate",      "pulse_type": "authn_token"},
+    {"from": "order_service", "to": "authz_gate",      "pulse_type": "order_request"},
+    {"from": "authz_gate",    "to": "order_gate",      "pulse_type": "authz_grant"},
+    {"from": "order_service", "to": "order_gate",      "pulse_type": "order_request"},
+    {"from": "order_gate",    "to": "notify_gate",     "pulse_type": "order_accepted"},
+    {"from": "order_gate",    "to": "feedback_gate",   "pulse_type": "order_accepted"},
+    {"from": "feedback_gate", "to": "order_service",   "pulse_type": "feedback_pulse"},
+    {"from": "client",        "to": "unprotected_gate","pulse_type": "raw_request"},
+    {"from": "unprotected_gate", "to": "deep_gate",   "pulse_type": "internal_event"},
+    {"from": "notify",        "to": "notify_gate",     "pulse_type": "order_accepted"}
+  ]
+}

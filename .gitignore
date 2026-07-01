@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Editor / env
+.vscode/
+.env
+
+# Rust build output
+target/
+
+# Agent iteration churn (not results)
+**/_iterating.json
+**/logs/
+
+# rust-validator carries its own .git — versioned separately for now
+tools/rust-validator/
