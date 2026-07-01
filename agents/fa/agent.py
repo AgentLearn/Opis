@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from .prompts import SYSTEM_PROMPT, GATE_GENERATION_PROMPT, GATE_INDEX_ROW_PROMPT, build_user_prompt
+from .prompts import SYSTEM_PROMPT, GATE_GENERATION_PROMPT, build_user_prompt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "agents"
@@ -22,6 +22,13 @@ TOOLS_DIR = REPO_ROOT / "tools"
 
 MAX_ITERATIONS = 5
 MODEL = "claude-opus-4-8"
+
+# Once the same defect fingerprint has been observed this many times (across
+# iterations AND prior runs, via persisted defect history) without being
+# resolved by rewiring, FA is nudged to propose a NEW gate via ADR instead of
+# burning the remaining iterations rewiring around a need that doesn't fit any
+# existing gate. Tunable — lower is more eager to escalate to an ADR.
+ADR_NUDGE_THRESHOLD = 3
 
 
 class FAAgent:
@@ -313,14 +320,14 @@ class FAAgent:
         return match.group(1) if match else None
 
     def _generate_index_row(self, gate_md: str) -> str:
-        """Ask LLM for the index table row for this gate."""
-        response = self.client.messages.create(
-            model=MODEL,
-            max_tokens=256,
-            system=GATE_INDEX_ROW_PROMPT,
-            messages=[{"role": "user", "content": gate_md}],
-        )
-        return response.content[0].text.strip()
+        """Derive the gates/index.md table row deterministically from the gate
+        file's own frontmatter — no LLM call. The frontmatter already IS the
+        source of truth; asking a model to re-summarise it only adds a
+        nondeterministic drift surface between the index and the file on disk.
+        Uses the same derivation proof.py's index-consistency checker applies,
+        so writer and checker can never disagree."""
+        pm = self._proof_module()
+        return pm.derive_index_row(pm.parse_gate_frontmatter(gate_md))
 
     def _process_approved_adrs(self) -> int:
         """Create gate files from approved ADRs. Returns count of gates created."""
@@ -398,6 +405,37 @@ class FAAgent:
             "actually resolved unless every item here is true at once:\n"
             + "\n".join(f"- {line}" for line in error_history.values())
         )
+
+    @staticmethod
+    def _format_recurrence_nudges(defect_history: dict[str, dict]) -> str:
+        """When a defect fingerprint keeps recurring — either many times within
+        this run or reopened after a prior 'fix' — more rewiring is unlikely to
+        resolve it: the need probably doesn't fit any existing gate's contract.
+        Emit a strong nudge telling FA to propose a NEW gate via an `adrs` array
+        this turn (and emit NO flow spec), rather than exhausting the remaining
+        iterations. Fires at ADR_NUDGE_THRESHOLD occurrences, or on any reopen.
+        Returns '' when nothing is chronic yet."""
+        chronic = [
+            v for v in defect_history.values()
+            if v.get("status") == "outstanding"
+            and (v.get("times_seen", 0) >= ADR_NUDGE_THRESHOLD or v.get("reopened_count", 0) >= 1)
+        ]
+        if not chronic:
+            return ""
+        lines = [
+            "STOP REWIRING — the defect(s) below have recurred repeatedly without "
+            "being resolved by rewiring existing gates. That is a strong signal the "
+            "need does not fit any existing gate's contract, so another wiring attempt "
+            "will likely fail the same way. Instead, THIS TURN output an `adrs` array "
+            "proposing a NEW gate (described in kata-agnostic computing terms only) that "
+            "covers this need, and emit NO flow spec. Only the User approving that ADR "
+            "will create the gate you're missing:",
+        ]
+        for v in sorted(chronic, key=lambda e: -e.get("times_seen", 0)):
+            lines.append(
+                f"- (seen {v.get('times_seen', 0)}×, reopened {v.get('reopened_count', 0)}×) {v['line']}"
+            )
+        return "\n".join(lines)
 
     # ── defect history (persisted ACROSS separate runs, not just within one) ─
     #
@@ -496,7 +534,16 @@ class FAAgent:
             print(f"  iteration {iteration}/{MAX_ITERATIONS}...")
             log.append(f"\n--- iteration {iteration} ---")
 
-            raw = self._call_llm(kata, slot_types, gates_index, errors)
+            # A defect that keeps recurring won't be fixed by more rewiring —
+            # nudge FA to propose a new gate via ADR before it burns the rest
+            # of the iterations. Prepended so it leads the error feedback.
+            nudges = self._format_recurrence_nudges(defect_history)
+            call_errors = f"{nudges}\n\n{errors}" if nudges else errors
+            if nudges:
+                print("  recurrence nudge active — steering FA toward an ADR for chronic defect(s)")
+                log.append("recurrence nudge injected (chronic defect past threshold)")
+
+            raw = self._call_llm(kata, slot_types, gates_index, call_errors)
             log.append(f"LLM response ({len(raw)} chars)")
 
             try:

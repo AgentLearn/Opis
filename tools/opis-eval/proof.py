@@ -448,6 +448,88 @@ def check_gate_conformance(spec: dict, gates_dir: Path) -> list[dict]:
     return issues
 
 
+# ── gate-index consistency: does gates/index.md match the gate files? ─────────
+#
+# index.md is an append-only markdown table FA writes a row to whenever a new
+# gate file is created. Nothing kept the two in sync: a hand-edited gate file,
+# or a row that drifted, would go unnoticed. This derives each gate's canonical
+# index row straight from its own frontmatter (the source of truth) and diffs
+# it against what index.md actually says — same derivation FA now uses to write
+# the row, so writer and checker can't disagree.
+
+def derive_index_row(fm: dict) -> str:
+    """Canonical gates/index.md table row for a gate, derived purely from its
+    frontmatter: `name | kind | in-types | out-types | auth_required`. Slot
+    types are listed in declaration order (the index preserves order)."""
+    name = fm.get("name", "?")
+    kind = fm.get("kind", "gate")
+    inputs = ", ".join(s.get("type", "") for s in fm.get("input_slots", []) if s.get("type"))
+    outputs = ", ".join(s.get("type", "") for s in fm.get("output_slots", []) if s.get("type"))
+    auth = str(fm.get("auth_required", "false")).strip().lower()
+    auth = "true" if auth == "true" else "false"
+    return f"{name} | {kind} | {inputs} | {outputs} | {auth}"
+
+
+def parse_index_rows(index_text: str) -> dict[str, str]:
+    """Parse gates/index.md's markdown table into {gate_name: normalized_row}.
+    Skips the header row and the `|---|` separator."""
+    rows: dict[str, str] = {}
+    for line in index_text.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) != 5:
+            continue
+        name = cells[0]
+        if name in ("gate", "") or set(name) <= set("-"):
+            continue  # header or `|---|` separator row
+        rows[name] = " | ".join(cells)
+    return rows
+
+
+def check_index_consistency(gates_dir: Path) -> list[str]:
+    """Verify gates/index.md is in sync with the gate .md files on disk:
+    every file has a matching row, every row has a file, and each row's fields
+    match the file's frontmatter. Returns a list of drift messages (empty ==
+    consistent)."""
+    issues: list[str] = []
+    index_path = gates_dir / "index.md"
+    if not index_path.exists():
+        return [f"no index.md found in {gates_dir}"]
+
+    index_rows = parse_index_rows(index_path.read_text())
+    file_rows: dict[str, str] = {}
+    for path in sorted(gates_dir.glob("*.md")):
+        if path.name == "index.md":
+            continue
+        fm = parse_gate_frontmatter(path.read_text())
+        name = fm.get("name")
+        if not name:
+            issues.append(f"gate file '{path.name}' has no name in frontmatter")
+            continue
+        if name != path.stem:
+            issues.append(
+                f"gate file '{path.name}': frontmatter name '{name}' != filename stem '{path.stem}'"
+            )
+        file_rows[name] = derive_index_row(fm)
+
+    for name, derived in file_rows.items():
+        if name not in index_rows:
+            issues.append(f"gate '{name}' has a file but no row in index.md")
+        elif index_rows[name] != derived:
+            issues.append(
+                f"gate '{name}' index row is out of sync with its file:\n"
+                f"      index: {index_rows[name]}\n"
+                f"      file : {derived}"
+            )
+    for name in index_rows:
+        if name not in file_rows:
+            issues.append(f"index.md has a row for '{name}' but no {name}.md file exists")
+
+    return issues
+
+
 # ── wiring-gap vs. no-domain-source ──────────────────────────────────────────
 #
 # opis-eval's "requires X but no upstream path produces this type" reads the
