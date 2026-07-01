@@ -108,6 +108,37 @@ def check_flow(flow_path: Path, gates_dir: Path) -> tuple[list[str], int]:
     return issues, len(results)
 
 
+def canonical_internals(gates_dir: Path) -> list[tuple[str, Path]]:
+    """Every gate template with committed internals: gates/<template>/internals_vN.json,
+    canonical = highest N. These passed gate-proof when written — golden corpus,
+    same contract as committed flows."""
+    found: list[tuple[str, Path]] = []
+    for tdir in sorted(d for d in gates_dir.iterdir() if d.is_dir()):
+        versions: list[tuple[int, Path]] = []
+        for p in tdir.glob("internals_v*.json"):
+            m = re.match(r"internals_v(\d+)$", p.stem)
+            if m:
+                versions.append((int(m.group(1)), p))
+        if versions:
+            found.append((tdir.name, max(versions)[1]))
+    return found
+
+
+def check_internals(internals_path: Path, gates_dir: Path) -> list[str]:
+    """Re-run the full gate-proof battery against committed gate internals."""
+    result = subprocess.run(
+        [sys.executable, str(HERE / "gate_proof.py"), str(internals_path),
+         "--gates-dir", str(gates_dir)],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return []
+    return [
+        line.strip() for line in result.stdout.splitlines()
+        if "✗" in line and "violation(s)" not in line
+    ] or [f"gate-proof failed (exit {result.returncode})"]
+
+
 def main() -> None:
     gates_dir = GATES_DIR
     output_dir = OUTPUT_DIR
@@ -140,6 +171,21 @@ def main() -> None:
                 for sub in line.splitlines():
                     print(err(f"    {sub}"))
 
+    internals = canonical_internals(gates_dir)
+    print(hdr("Gate internals (gate-proof: contract, coverage, exclusivity, timing)"))
+    if not internals:
+        print(warn("no committed gate internals found — nothing to verify"))
+    for template, ipath in internals:
+        issues = check_internals(ipath, gates_dir)
+        if not issues:
+            print(ok(f"{template:20s} {ipath.name}  — contract honored"))
+        else:
+            total_regressions += 1
+            print(err(f"{template:20s} {ipath.name}  — {len(issues)} regression(s)"))
+            for line in issues:
+                for sub in line.splitlines():
+                    print(err(f"    {sub}"))
+
     print(hdr("Gate-index consistency (index.md vs gate files)"))
     index_issues = proof_mod.check_index_consistency(gates_dir)
     if not index_issues:
@@ -152,7 +198,8 @@ def main() -> None:
 
     print()
     if total_regressions == 0:
-        print(c(f"✓ all {len(flows)} committed flow(s) still pass; index consistent", GREEN))
+        print(c(f"✓ all {len(flows)} committed flow(s) and {len(internals)} gate "
+                f"internal(s) still pass; index consistent", GREEN))
         sys.exit(0)
     print(c(f"✗ {total_regressions} regression(s) detected", RED))
     sys.exit(1)

@@ -1,0 +1,86 @@
+{
+  "gate": "payment_processor",
+  "version": 1,
+  "description": "Internal topology of the payment_processor gate template. Validates the charge request locally, calls the external payment provider with a bounded wait, and emits exactly one outcome per admission: payment_confirmed or payment_failed. Hand-written golden example for the GA (Gate Architect) verification stack — see GA_PLAN.md.",
+  "in": ["payment", "auth_token"],
+  "out": ["payment_confirmed", "payment_failed"],
+  "archetypes": {
+    "charge_request": {
+      "extends": "command",
+      "description": "A locally validated, provider-ready charge instruction"
+    },
+    "charge_rejected": {
+      "extends": "event",
+      "description": "Fact that the charge request failed local validation (malformed amount, expired token binding, unsupported currency)"
+    },
+    "provider_ok": {
+      "extends": "event",
+      "description": "Fact that the external provider authorised the charge"
+    },
+    "provider_declined": {
+      "extends": "event",
+      "description": "Fact that the external provider declined the charge, errored, or timed out past the bounded wait"
+    }
+  },
+  "loci": {
+    "ProviderEndpoint": {
+      "description": "External payment provider API — the round-trip this gate exists to bound"
+    }
+  },
+  "gates": {
+    "ValidateCharge": {
+      "description": "Local structural validation of the payment against the auth token before any external call",
+      "kind": "gate",
+      "requires": ["payment", "auth_token"],
+      "emits": [
+        { "outcome": "valid", "flows": ["charge_request"], "weight": 0.97 },
+        { "outcome": "invalid", "flows": ["charge_rejected"], "weight": 0.03 }
+      ],
+      "window_ms": 1000,
+      "refractory_ms": 100
+    },
+    "CallProvider": {
+      "description": "Bounded synchronous call to the external provider; window_ms is the provider wait budget and dominates the parent gate's timing",
+      "kind": "gate",
+      "requires": ["charge_request"],
+      "emits": [
+        { "outcome": "authorised", "flows": ["provider_ok"], "weight": 0.9 },
+        { "outcome": "declined_or_timeout", "flows": ["provider_declined"], "weight": 0.1 }
+      ],
+      "window_ms": 12000,
+      "refractory_ms": 2000
+    },
+    "ConfirmPayment": {
+      "description": "Terminal step for the success branch — shapes the provider authorisation into the contract's payment_confirmed outcome",
+      "kind": "gate",
+      "requires": ["provider_ok"],
+      "emits": [
+        { "outcome": "confirmed", "flows": ["payment_confirmed"], "weight": 1.0 }
+      ],
+      "window_ms": 1000,
+      "refractory_ms": 100
+    },
+    "FailPayment": {
+      "description": "Terminal step for the failure branch — any single failure signal (local rejection OR provider decline) produces the contract's payment_failed outcome",
+      "kind": "gate",
+      "logic": "OR",
+      "requires": ["charge_rejected", "provider_declined"],
+      "emits": [
+        { "outcome": "failed", "flows": ["payment_failed"], "weight": 1.0 }
+      ],
+      "window_ms": 1000,
+      "refractory_ms": 100
+    }
+  },
+  "synapses": [
+    { "from": "payment_processor", "to": "ValidateCharge", "pulse_type": "payment", "medium": "local", "interaction": "push" },
+    { "from": "payment_processor", "to": "ValidateCharge", "pulse_type": "auth_token", "medium": "local", "interaction": "push" },
+    { "from": "ValidateCharge", "to": "CallProvider", "pulse_type": "charge_request", "medium": "local", "interaction": "push" },
+    { "from": "ValidateCharge", "to": "FailPayment", "pulse_type": "charge_rejected", "medium": "local", "interaction": "push" },
+    { "from": "CallProvider", "to": "ProviderEndpoint", "pulse_type": "charge_request", "medium": "internet", "interaction": "push" },
+    { "from": "CallProvider", "to": "ConfirmPayment", "pulse_type": "provider_ok", "medium": "local", "interaction": "push" },
+    { "from": "CallProvider", "to": "FailPayment", "pulse_type": "provider_declined", "medium": "local", "interaction": "push" },
+    { "from": "ConfirmPayment", "to": "payment_processor", "pulse_type": "payment_confirmed", "medium": "local", "interaction": "push" },
+    { "from": "FailPayment", "to": "payment_processor", "pulse_type": "payment_failed", "medium": "local", "interaction": "push" }
+  ]
+}

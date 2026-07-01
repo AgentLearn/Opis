@@ -68,6 +68,40 @@ FIRED = "__fired__"      # gate fired: all its real required inputs genuinely ar
 FALLBACK = "__fallback__"  # gate forced to fire: stuck behind a genuine requires-cycle
 
 
+def parse_gate_logic(gspec: dict) -> tuple[str, int]:
+    """Normalise a gate's `logic` field to (op, n). eval.py's check_gate_logic
+    is ground truth for valid shapes: logic is either a string ("OR") or an
+    object ({"op": "THRESHOLD", "n": 2, ...}). Default is AND. n is only
+    meaningful for THRESHOLD."""
+    logic = gspec.get("logic")
+    if logic is None:
+        return "AND", 0
+    if isinstance(logic, str):
+        return logic.upper(), 0
+    if isinstance(logic, dict):
+        return logic.get("op", "AND").upper(), int(logic.get("n", 0))
+    return "AND", 0
+
+
+def gate_logic_satisfied(gspec: dict, arrived: set[str], type_dag: dict[str, set[str]]) -> bool:
+    """Logic-aware join satisfaction, subtype-aware per input:
+    AND — every non-optional required type arrived; OR / FIRST — at least one;
+    THRESHOLD — at least n. A gate with no requires is trivially satisfied."""
+    required = set(gspec.get("requires", [])) - set(gspec.get("optional", []))
+    if not required:
+        return True
+    met = sum(
+        1 for t in required
+        if t in arrived or (type_dag.get(t, set()) & arrived)
+    )
+    op, n = parse_gate_logic(gspec)
+    if op in ("OR", "FIRST"):
+        return met >= 1
+    if op == "THRESHOLD":
+        return met >= max(1, n)
+    return met == len(required)
+
+
 # ── reachability with path reconstruction (AND-join fixed point) ──────────────
 
 def trace_reachability_with_paths(
@@ -120,15 +154,9 @@ def trace_reachability_with_paths(
                 add(s, edge.pulse_type, None)
 
     def gate_satisfied(gname: str, gspec: dict) -> bool:
-        required = set(gspec.get("requires", [])) - set(gspec.get("optional", []))
-        arrived = reachable.get(gname, set())
-        for t in required:
-            if t in arrived:
-                continue
-            if type_dag.get(t, set()) & arrived:
-                continue
-            return False
-        return True
+        # Logic-aware (AND / OR / FIRST / THRESHOLD) — an OR-join gate must not
+        # be held to the AND fixed point, or flows using it deadlock the prover.
+        return gate_logic_satisfied(gspec, reachable.get(gname, set()), type_dag)
 
     def try_fire(gname: str, gspec: dict, fallback: bool = False) -> None:
         if gname in fired:
