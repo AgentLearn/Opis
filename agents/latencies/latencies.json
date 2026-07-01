@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "description": "Latency library for the opis-twin Monte Carlo simulator (GA_PLAN Phase 4). All distributions are lognormal, parameterized by p50/p95 in ms. confidence: 'sourced' entries cite a real published benchmark; 'llm-estimate' entries are model-proposed real-life expectations, explicitly unverified — replace with measured values when CA instruments real implementations. Norms are advisory end-to-end expectations keyed by base slot type, used by twin_check.py to flag requirement paths that are unusually slow — never a hard failure.",
+  "media": {
+    "local": {
+      "p50_ms": 1,
+      "p95_ms": 5,
+      "confidence": "llm-estimate",
+      "note": "in-process or same-host IPC"
+    },
+    "lan": {
+      "p50_ms": 2,
+      "p95_ms": 10,
+      "confidence": "llm-estimate",
+      "note": "same-site wired network hop"
+    },
+    "internet": {
+      "p50_ms": 44,
+      "p95_ms": 150,
+      "confidence": "sourced",
+      "source": "Ookla H2 2025 mobile median RTT 44 ms (T-Mobile 5G NSA/SA mix); 4G LTE field measurements 30-50 ms median — https://enqt.de/en/blog/lte-vs-5g-part-2-latency-times/, https://spenza.com/telecom/5g-vs-4g-speed-comparison/",
+      "note": "one WAN traversal incl. mobile last mile; p95 covers congested/poor-signal tail"
+    }
+  },
+  "operations": {
+    "payment_processor": {
+      "p50_ms": 200,
+      "p95_ms": 500,
+      "confidence": "sourced",
+      "source": "Adyen published commitment: 10k+ TPS with p95 authorization latency < 500 ms — https://www.index.dev/skill-vs-skill/payment-processing-mollie-vs-adyen-vs-stripe-europe; payment APIs generally expected sub-second p95 — https://nurbak.com/en/blog/api-response-time/",
+      "note": "external card authorization round-trip, provider side"
+    },
+    "sentinel_auth": {
+      "p50_ms": 50,
+      "p95_ms": 200,
+      "confidence": "llm-estimate",
+      "note": "token validation / credential check, typically cached"
+    },
+    "order_intake": {
+      "p50_ms": 30,
+      "p95_ms": 120,
+      "confidence": "llm-estimate",
+      "note": "request parsing + persistence write"
+    },
+    "order_validator": {
+      "p50_ms": 40,
+      "p95_ms": 200,
+      "confidence": "llm-estimate",
+      "note": "business-rule evaluation incl. catalogue lookups"
+    },
+    "producer_submitter": {
+      "p50_ms": 100,
+      "p95_ms": 500,
+      "confidence": "llm-estimate",
+      "note": "handoff to production system (kitchen display, fulfilment queue)"
+    },
+    "pickup_estimator": {
+      "p50_ms": 150,
+      "p95_ms": 800,
+      "confidence": "llm-estimate",
+      "note": "ETA computation with routing/traffic model call"
+    },
+    "delivery_router": {
+      "p50_ms": 200,
+      "p95_ms": 1000,
+      "confidence": "llm-estimate",
+      "note": "route optimization over candidate couriers/zones"
+    },
+    "driver_dispatcher": {
+      "p50_ms": 500,
+      "p95_ms": 5000,
+      "confidence": "llm-estimate",
+      "note": "offer push + human driver acceptance; tail dominated by human reaction"
+    },
+    "menu_manager": {
+      "p50_ms": 50,
+      "p95_ms": 300,
+      "confidence": "llm-estimate",
+      "note": "catalogue read/update"
+    },
+    "loyalty_processor": {
+      "p50_ms": 40,
+      "p95_ms": 200,
+      "confidence": "llm-estimate",
+      "note": "points accrual write"
+    },
+    "event_recorder": {
+      "p50_ms": 10,
+      "p95_ms": 50,
+      "confidence": "llm-estimate",
+      "note": "append-only event write"
+    },
+    "repeat_event_throttle": {
+      "p50_ms": 5,
+      "p95_ms": 20,
+      "confidence": "llm-estimate",
+      "note": "counter check against rolling window"
+    },
+    "zone_regulator": {
+      "p50_ms": 20,
+      "p95_ms": 100,
+      "confidence": "llm-estimate",
+      "note": "zone state lookup + threshold decision"
+    },
+    "completion_finalizer": {
+      "p50_ms": 30,
+      "p95_ms": 150,
+      "confidence": "llm-estimate",
+      "note": "terminal state transition + receipts"
+    }
+  },
+  "norms": {
+    "payment_confirmed": {
+      "expected_p95_ms": 3000,
+      "confidence": "llm-estimate",
+      "note": "payment confirmation: seconds, not minutes — user is watching a spinner"
+    },
+    "accepted_order": {
+      "expected_p95_ms": 5000,
+      "confidence": "llm-estimate",
+      "note": "order acceptance feedback: a few seconds"
+    },
+    "command": {
+      "expected_p95_ms": 30000,
+      "confidence": "llm-estimate",
+      "note": "dispatch command reaching a worker/driver: tens of seconds"
+    },
+    "estimate": {
+      "expected_p95_ms": 5000,
+      "confidence": "llm-estimate",
+      "note": "ETA shown to user: a few seconds"
+    },
+    "notification": {
+      "expected_p95_ms": 10000,
+      "confidence": "llm-estimate",
+      "note": "outbound notification delivery: seconds"
+    },
+    "event": {
+      "expected_p95_ms": 60000,
+      "confidence": "llm-estimate",
+      "note": "bookkeeping facts: eventual, within a minute"
+    }
+  }
+}

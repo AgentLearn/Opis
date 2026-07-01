@@ -158,6 +158,8 @@ def trace_reachability_with_paths(
         # be held to the AND fixed point, or flows using it deadlock the prover.
         return gate_logic_satisfied(gspec, reachable.get(gname, set()), type_dag)
 
+    emitted_by: dict[str, set[str]] = defaultdict(set)
+
     def try_fire(gname: str, gspec: dict, fallback: bool = False) -> None:
         if gname in fired:
             return
@@ -166,17 +168,35 @@ def trace_reachability_with_paths(
         fired.add(gname)
         marker = (gname, FALLBACK if fallback else FIRED)
         for flow in eval_mod.extract_emitted_flows(gspec.get("emits", [])):
+            # Record the emission even when the same type already arrived as an
+            # input (a gate that consumes and re-emits a type) — forwardability
+            # under no-pass-through depends on emitted_by, not on pred markers.
+            emitted_by[gname].add(flow)
             add(gname, flow, marker)
+        # Re-drain this gate even if every emitted type was already reachable
+        # as an input (add() only queues NEW types): newly-forwardable types
+        # must still cross the outgoing synapses.
+        queue.append(gname)
 
     def drain() -> None:
         while queue:
             node = queue.popleft()
+            # NO PASS-THROUGH (semantics decision 2026-07-01, confirmed against
+            # the twin): a gate forwards only types it EMITS — a type that
+            # merely arrived as input does not relay across the gate's
+            # outgoing synapses. Loci (passive carriers) relay everything.
+            # emitted_by (not pred markers) is authoritative: a gate that
+            # consumes and re-emits the same type still forwards it.
+            if node in gates:
+                forwardable = emitted_by[node] & reachable[node]
+            else:
+                forwardable = set(reachable[node])
             for edge in fwd.get(node, []):
                 if edge.inhibitor:
                     continue
                 crossing = (
-                    {edge.pulse_type} & reachable[node]
-                    if edge.pulse_type else set(reachable[node])
+                    {edge.pulse_type} & forwardable
+                    if edge.pulse_type else forwardable
                 )
                 for t in crossing:
                     add(edge.dst, t, (node, t))

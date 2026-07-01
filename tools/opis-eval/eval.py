@@ -398,10 +398,18 @@ def check_reachability(
                 reachable[name].add(edge.pulse_type)
 
     # Gates produce all flows across all their outcomes (conservative union)
-    for gname, gspec in gates.items():
-        reachable[gname].update(extract_emitted_flows(gspec.get("emits", [])))
+    gate_emits: dict[str, set[str]] = {
+        gname: set(extract_emitted_flows(gspec.get("emits", [])))
+        for gname, gspec in gates.items()
+    }
+    for gname in gates:
+        reachable[gname].update(gate_emits[gname])
 
-    # Propagate via BFS (forward)
+    # Propagate via BFS (forward).
+    # NO PASS-THROUGH (semantics decision 2026-07-01, confirmed against the
+    # twin): a gate forwards only types it EMITS — a pulse that merely arrived
+    # at a gate does not relay across its outgoing synapses. Loci (passive
+    # carriers) still relay everything that reaches them.
     queue: deque[str] = deque(
         sources + list(gates.keys()) + list(explicit_sources - set(sources))
     )
@@ -413,18 +421,23 @@ def check_reachability(
             continue
         visited.add(node)
 
+        forwardable = (
+            reachable[node] & gate_emits[node] if node in gates
+            else set(reachable[node])
+        )
         for edge in fwd.get(node, []):
             if edge.inhibitor:
                 continue
             crossing = (
-                {edge.pulse_type} & reachable[node]
+                {edge.pulse_type} & forwardable
                 if edge.pulse_type
-                else set(reachable[node])
+                else set(forwardable)
             )
             before = len(reachable[edge.dst])
             reachable[edge.dst].update(crossing)
             if len(reachable[edge.dst]) > before:
                 queue.append(edge.dst)
+                visited.discard(edge.dst)
 
     # Check gates — subtype-aware; optional types are enrichment, not required
     errors: list[str] = []

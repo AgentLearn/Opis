@@ -232,6 +232,7 @@ def _constrained_reachability(
     }
 
     reachable: dict[str, set[str]] = defaultdict(set)
+    emitted: dict[str, set[str]] = defaultdict(set)  # gate → types it actually emitted
     fired: set[str] = set()
     queue: deque[str] = deque()
 
@@ -257,12 +258,14 @@ def _constrained_reachability(
 
     while queue:
         node = queue.popleft()
+        # NO PASS-THROUGH: gates forward only what they emitted; loci relay all.
+        forwardable = emitted[node] & reachable[node] if node in gates else set(reachable[node])
         for e in fwd.get(node, []):
             if e.inhibitor:
                 continue
             crossing = (
-                {e.pulse_type} & reachable[node] if e.pulse_type
-                else set(reachable[node])
+                {e.pulse_type} & forwardable if e.pulse_type
+                else set(forwardable)
             )
             for t in crossing:
                 add(e.dst, t)
@@ -271,6 +274,7 @@ def _constrained_reachability(
             if proof_mod.gate_logic_satisfied(gspec, reachable.get(node, set()), type_dag):
                 fired.add(node)
                 for t in emitted_flows(node, gspec):
+                    emitted[node].add(t)
                     add(node, t)
                 queue.append(node)
 
