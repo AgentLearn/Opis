@@ -302,9 +302,41 @@ def extract_emitted_flows(emits: list) -> list[str]:
     return flows
 
 
+_BASE_TAXONOMY_CACHE: dict[str, str] | None = None
+
+
+def load_base_taxonomy() -> dict[str, str]:
+    """
+    Parse agents/slot_types/index.md's table into {type: parent} for base
+    slot types with a non-root parent (e.g. accepted_order → order).
+
+    Flows only declare their own domain archetypes; base→base edges live
+    solely in this index. Without them, subtype resolution breaks whenever
+    coverage depends on a base-level edge (e.g. accepted_cancellation_order
+    extends accepted_order extends order — the second hop was invisible,
+    so a delivery_router `order` slot rejected a legitimate subtype).
+    Anchored to this repo's layout; returns {} if the index is absent.
+    """
+    global _BASE_TAXONOMY_CACHE
+    if _BASE_TAXONOMY_CACHE is not None:
+        return _BASE_TAXONOMY_CACHE
+    edges: dict[str, str] = {}
+    index = Path(__file__).resolve().parents[2] / "agents" / "slot_types" / "index.md"
+    if index.exists():
+        for line in index.read_text().splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 2 and cells[0] and not set(cells[0]) <= {"-", " "}:
+                name, parent = cells[0], cells[1]
+                if name != "type" and parent and parent not in ("—", "-", ""):
+                    edges[name] = parent
+    _BASE_TAXONOMY_CACHE = edges
+    return edges
+
+
 def build_type_dag(spec: dict) -> dict[str, set[str]]:
     """
-    Build subtype map from archetype `extends` declarations.
+    Build subtype map from archetype `extends` declarations, merged with the
+    base slot-type taxonomy (agents/slot_types/index.md).
     Returns {supertype: set_of_all_subtypes} (transitive closure).
 
     Example: sandwich extends food, food extends consumable
@@ -312,6 +344,8 @@ def build_type_dag(spec: dict) -> dict[str, set[str]]:
     """
     archetypes = spec.get("archetypes", {})
     children: dict[str, set[str]] = defaultdict(set)
+    for name, parent in load_base_taxonomy().items():
+        children[parent].add(name)
     for name, aspec in archetypes.items():
         if isinstance(aspec, dict):
             parent = aspec.get("extends")

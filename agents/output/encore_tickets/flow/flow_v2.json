@@ -1,0 +1,853 @@
+{
+  "name": "encore_tickets",
+  "version": 2,
+  "description": "Event ticket booking platform with seat reservation, payment, digital ticket issuance, cancellation, and loyalty points.",
+  "archetypes": {
+    "seat_reservation_order": {
+      "extends": "order",
+      "description": "A customer request to reserve one or more seats for an event"
+    },
+    "accepted_reservation_order": {
+      "extends": "accepted_order",
+      "description": "A seat reservation order that passed intake validation"
+    },
+    "rejected_reservation_order": {
+      "extends": "rejected_order",
+      "description": "A seat reservation order that failed intake validation"
+    },
+    "ticket_payment": {
+      "extends": "payment",
+      "description": "Payment submitted by a customer for a seat reservation"
+    },
+    "confirmed_ticket_payment": {
+      "extends": "payment_confirmed",
+      "description": "A ticket payment that was successfully authorised"
+    },
+    "failed_ticket_payment": {
+      "extends": "payment_failed",
+      "description": "A ticket payment that was declined"
+    },
+    "seat_inventory_update": {
+      "extends": "inventory_update",
+      "description": "A change to available seat inventory for an event"
+    },
+    "event_listing_update": {
+      "extends": "menu_update",
+      "description": "An organiser update to event listing, pricing, or seat capacity"
+    },
+    "venue_routing_decision": {
+      "extends": "routing_decision",
+      "description": "Routing decision resolving seat availability against capacity"
+    },
+    "digital_ticket": {
+      "extends": "command",
+      "description": "Issued digital ticket delivered to the customer"
+    },
+    "ticket_issuance_ack": {
+      "extends": "ack",
+      "description": "Acknowledgement that a digital ticket was issued"
+    },
+    "cancellation_order": {
+      "extends": "order",
+      "description": "A customer request to cancel a reservation and obtain a refund"
+    },
+    "accepted_cancellation_order": {
+      "extends": "accepted_order",
+      "description": "A cancellation request that passed intake validation"
+    },
+    "refund_payment": {
+      "extends": "payment",
+      "description": "A refund payment to be processed for a cancelled reservation"
+    },
+    "confirmed_refund_payment": {
+      "extends": "payment_confirmed",
+      "description": "A refund that was successfully issued"
+    },
+    "loyalty_reward": {
+      "extends": "reward",
+      "description": "Loyalty points awarded to a customer after confirmed payment"
+    },
+    "loyalty_notification": {
+      "extends": "notification",
+      "description": "Notification sent to customer about loyalty points earned"
+    },
+    "customer_auth_request": {
+      "extends": "auth_request",
+      "description": "Authentication request from a customer actor"
+    },
+    "organiser_auth_request": {
+      "extends": "auth_request",
+      "description": "Authentication request from an event organiser actor"
+    },
+    "customer_auth_token": {
+      "extends": "auth_token",
+      "description": "Auth token granted to a customer"
+    },
+    "organiser_auth_token": {
+      "extends": "auth_token",
+      "description": "Auth token granted to an event organiser"
+    },
+    "reservation_rejection_notification": {
+      "extends": "notification",
+      "description": "Notification to customer that their reservation was rejected"
+    },
+    "cancellation_notification": {
+      "extends": "notification",
+      "description": "Notification to customer that their cancellation/refund was processed"
+    }
+  },
+  "loci": {
+    "Customer": {
+      "description": "End customer using mobile app or website to browse, reserve, and cancel",
+      "source": true
+    },
+    "Organiser": {
+      "description": "Event organiser managing listings, pricing, and capacity",
+      "source": true
+    },
+    "NotificationService": {
+      "description": "Delivers notifications to customers",
+      "source": false
+    },
+    "TicketStore": {
+      "description": "Stores and delivers issued digital tickets",
+      "source": false
+    },
+    "InventoryStore": {
+      "description": "Maintains seat inventory state",
+      "source": false
+    }
+  },
+  "gates": {
+    "CustomerSentinel": {
+      "gate_template": "sentinel_auth",
+      "kind": "sentinel",
+      "requires": [
+        "customer_auth_request"
+      ],
+      "emits": [
+        {
+          "outcome": "authenticated",
+          "flows": [
+            "customer_auth_token"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "OrganiserSentinel": {
+      "gate_template": "sentinel_auth",
+      "kind": "sentinel",
+      "requires": [
+        "organiser_auth_request"
+      ],
+      "emits": [
+        {
+          "outcome": "authenticated",
+          "flows": [
+            "organiser_auth_token"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "ReservationIntake": {
+      "gate_template": "order_intake",
+      "kind": "gate",
+      "requires": [
+        "seat_reservation_order",
+        "customer_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "accepted",
+          "flows": [
+            "accepted_reservation_order"
+          ]
+        },
+        {
+          "outcome": "rejected",
+          "flows": [
+            "rejected_reservation_order"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    },
+    "VenueRouter": {
+      "gate_template": "delivery_router",
+      "kind": "gate",
+      "requires": [
+        "seat_reservation_order",
+        "location"
+      ],
+      "emits": [
+        {
+          "outcome": "routed",
+          "flows": [
+            "venue_routing_decision"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "InventoryValidator": {
+      "gate_template": "order_validator",
+      "kind": "gate",
+      "requires": [
+        "accepted_reservation_order",
+        "confirmed_ticket_payment",
+        "seat_inventory_update",
+        "venue_routing_decision"
+      ],
+      "emits": [
+        {
+          "outcome": "seat_available",
+          "flows": [
+            "accepted_reservation_order"
+          ]
+        },
+        {
+          "outcome": "seat_unavailable",
+          "flows": [
+            "rejected_reservation_order"
+          ]
+        }
+      ],
+      "window_ms": 15000,
+      "auth_required": true
+    },
+    "TicketPaymentSentinel": {
+      "gate_template": "sentinel_auth",
+      "kind": "sentinel",
+      "requires": [
+        "customer_auth_request"
+      ],
+      "emits": [
+        {
+          "outcome": "authenticated",
+          "flows": [
+            "customer_auth_token"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "TicketPaymentProcessor": {
+      "gate_template": "payment_processor",
+      "kind": "gate",
+      "requires": [
+        "ticket_payment",
+        "customer_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "payment_confirmed",
+          "flows": [
+            "confirmed_ticket_payment"
+          ]
+        },
+        {
+          "outcome": "payment_failed",
+          "flows": [
+            "failed_ticket_payment"
+          ]
+        }
+      ],
+      "window_ms": 15000,
+      "auth_required": true
+    },
+    "TicketIssuer": {
+      "gate_template": "producer_submitter",
+      "kind": "gate",
+      "requires": [
+        "accepted_reservation_order",
+        "venue_routing_decision"
+      ],
+      "emits": [
+        {
+          "outcome": "issued",
+          "flows": [
+            "digital_ticket"
+          ]
+        },
+        {
+          "outcome": "issuance_acked",
+          "flows": [
+            "ticket_issuance_ack"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    },
+    "LoyaltySentinel": {
+      "gate_template": "sentinel_auth",
+      "kind": "sentinel",
+      "requires": [
+        "customer_auth_request"
+      ],
+      "emits": [
+        {
+          "outcome": "authenticated",
+          "flows": [
+            "customer_auth_token"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "LoyaltyProcessor": {
+      "gate_template": "loyalty_processor",
+      "kind": "gate",
+      "requires": [
+        "confirmed_ticket_payment",
+        "customer_auth_token",
+        "loyalty_reward"
+      ],
+      "emits": [
+        {
+          "outcome": "points_awarded",
+          "flows": [
+            "loyalty_reward"
+          ]
+        },
+        {
+          "outcome": "customer_notified",
+          "flows": [
+            "loyalty_notification"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    },
+    "EventListingManager": {
+      "gate_template": "menu_manager",
+      "kind": "gate",
+      "requires": [
+        "event_listing_update",
+        "organiser_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "listing_updated",
+          "flows": [
+            "seat_inventory_update"
+          ]
+        },
+        {
+          "outcome": "listing_acked",
+          "flows": [
+            "ticket_issuance_ack"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    },
+    "CancellationIntake": {
+      "gate_template": "order_intake",
+      "kind": "gate",
+      "requires": [
+        "cancellation_order",
+        "customer_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "accepted",
+          "flows": [
+            "accepted_cancellation_order"
+          ]
+        },
+        {
+          "outcome": "rejected",
+          "flows": [
+            "rejected_reservation_order"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    },
+    "CancellationRouter": {
+      "gate_template": "delivery_router",
+      "kind": "gate",
+      "requires": [
+        "accepted_cancellation_order",
+        "location"
+      ],
+      "emits": [
+        {
+          "outcome": "routed",
+          "flows": [
+            "venue_routing_decision"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "RefundAuthSentinel": {
+      "gate_template": "sentinel_auth",
+      "kind": "sentinel",
+      "requires": [
+        "customer_auth_request"
+      ],
+      "emits": [
+        {
+          "outcome": "authenticated",
+          "flows": [
+            "customer_auth_token"
+          ]
+        }
+      ],
+      "window_ms": 5000,
+      "auth_required": false
+    },
+    "RefundProcessor": {
+      "gate_template": "payment_processor",
+      "kind": "gate",
+      "requires": [
+        "refund_payment",
+        "customer_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "refund_confirmed",
+          "flows": [
+            "confirmed_refund_payment"
+          ]
+        },
+        {
+          "outcome": "refund_failed",
+          "flows": [
+            "failed_ticket_payment"
+          ]
+        }
+      ],
+      "window_ms": 15000,
+      "auth_required": true
+    },
+    "InventoryReleaseManager": {
+      "gate_template": "menu_manager",
+      "kind": "gate",
+      "requires": [
+        "event_listing_update",
+        "organiser_auth_token"
+      ],
+      "emits": [
+        {
+          "outcome": "seat_released",
+          "flows": [
+            "seat_inventory_update"
+          ]
+        },
+        {
+          "outcome": "release_acked",
+          "flows": [
+            "ticket_issuance_ack"
+          ]
+        }
+      ],
+      "window_ms": 10000,
+      "auth_required": true
+    }
+  },
+  "synapses": [
+    {
+      "from": "Customer",
+      "to": "CustomerSentinel",
+      "pulse_type": "customer_auth_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "TicketPaymentSentinel",
+      "pulse_type": "customer_auth_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "LoyaltySentinel",
+      "pulse_type": "customer_auth_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "RefundAuthSentinel",
+      "pulse_type": "customer_auth_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "Organiser",
+      "to": "OrganiserSentinel",
+      "pulse_type": "organiser_auth_request",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "ReservationIntake",
+      "pulse_type": "seat_reservation_order",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "CustomerSentinel",
+      "to": "ReservationIntake",
+      "pulse_type": "customer_auth_token",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "VenueRouter",
+      "pulse_type": "seat_reservation_order",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "VenueRouter",
+      "pulse_type": "location",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "VenueRouter",
+      "to": "InventoryValidator",
+      "pulse_type": "venue_routing_decision",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "ReservationIntake",
+      "to": "InventoryValidator",
+      "pulse_type": "accepted_reservation_order",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "ReservationIntake",
+      "to": "NotificationService",
+      "pulse_type": "rejected_reservation_order",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "TicketPaymentProcessor",
+      "pulse_type": "ticket_payment",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "TicketPaymentSentinel",
+      "to": "TicketPaymentProcessor",
+      "pulse_type": "customer_auth_token",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "TicketPaymentProcessor",
+      "to": "InventoryValidator",
+      "pulse_type": "confirmed_ticket_payment",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "TicketPaymentProcessor",
+      "to": "NotificationService",
+      "pulse_type": "failed_ticket_payment",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "InventoryStore",
+      "to": "InventoryValidator",
+      "pulse_type": "seat_inventory_update",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "InventoryValidator",
+      "to": "TicketIssuer",
+      "pulse_type": "accepted_reservation_order",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "InventoryValidator",
+      "to": "NotificationService",
+      "pulse_type": "rejected_reservation_order",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "VenueRouter",
+      "to": "TicketIssuer",
+      "pulse_type": "venue_routing_decision",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "TicketIssuer",
+      "to": "TicketStore",
+      "pulse_type": "digital_ticket",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "TicketIssuer",
+      "to": "NotificationService",
+      "pulse_type": "ticket_issuance_ack",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "TicketPaymentProcessor",
+      "to": "LoyaltyProcessor",
+      "pulse_type": "confirmed_ticket_payment",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "LoyaltySentinel",
+      "to": "LoyaltyProcessor",
+      "pulse_type": "customer_auth_token",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "LoyaltyProcessor",
+      "pulse_type": "loyalty_reward",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "LoyaltyProcessor",
+      "to": "NotificationService",
+      "pulse_type": "loyalty_notification",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "LoyaltyProcessor",
+      "to": "InventoryStore",
+      "pulse_type": "loyalty_reward",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Organiser",
+      "to": "EventListingManager",
+      "pulse_type": "event_listing_update",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "OrganiserSentinel",
+      "to": "EventListingManager",
+      "pulse_type": "organiser_auth_token",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "EventListingManager",
+      "to": "InventoryStore",
+      "pulse_type": "seat_inventory_update",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "EventListingManager",
+      "to": "NotificationService",
+      "pulse_type": "ticket_issuance_ack",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "CancellationIntake",
+      "pulse_type": "cancellation_order",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "CustomerSentinel",
+      "to": "CancellationIntake",
+      "pulse_type": "customer_auth_token",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "CancellationIntake",
+      "to": "CancellationRouter",
+      "pulse_type": "accepted_cancellation_order",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "CancellationRouter",
+      "pulse_type": "location",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "CancellationRouter",
+      "to": "InventoryReleaseManager",
+      "pulse_type": "venue_routing_decision",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "CancellationIntake",
+      "to": "RefundProcessor",
+      "pulse_type": "accepted_cancellation_order",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "CancellationIntake",
+      "to": "NotificationService",
+      "pulse_type": "rejected_reservation_order",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "RefundAuthSentinel",
+      "to": "RefundProcessor",
+      "pulse_type": "customer_auth_token",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Customer",
+      "to": "RefundProcessor",
+      "pulse_type": "refund_payment",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "RefundProcessor",
+      "to": "NotificationService",
+      "pulse_type": "confirmed_refund_payment",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "RefundProcessor",
+      "to": "NotificationService",
+      "pulse_type": "failed_ticket_payment",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "Organiser",
+      "to": "InventoryReleaseManager",
+      "pulse_type": "event_listing_update",
+      "medium": "internet",
+      "interaction": "push"
+    },
+    {
+      "from": "OrganiserSentinel",
+      "to": "InventoryReleaseManager",
+      "pulse_type": "organiser_auth_token",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "InventoryReleaseManager",
+      "to": "InventoryStore",
+      "pulse_type": "seat_inventory_update",
+      "medium": "local",
+      "interaction": "push"
+    },
+    {
+      "from": "InventoryReleaseManager",
+      "to": "NotificationService",
+      "pulse_type": "ticket_issuance_ack",
+      "medium": "local",
+      "interaction": "push"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "text": "Customers can reserve seats for an event via mobile app or web \u2014 reservation orders are accepted through authenticated intake",
+      "target": {
+        "gate": "ReservationIntake",
+        "outcome": "accepted"
+      }
+    },
+    {
+      "id": "REQ-2",
+      "text": "Payment must be confirmed before a seat reservation is finalised \u2014 inventory validation requires confirmed payment",
+      "target": {
+        "gate": "InventoryValidator",
+        "outcome": "seat_available"
+      }
+    },
+    {
+      "id": "REQ-3",
+      "text": "Seat inventory must never be oversold \u2014 concurrent reservations are validated against remaining capacity via inventory state",
+      "target": {
+        "gate": "InventoryValidator",
+        "outcome": "seat_unavailable"
+      }
+    },
+    {
+      "id": "REQ-4",
+      "text": "Once payment is confirmed and a seat is reserved, the system issues a digital ticket to the customer",
+      "target": {
+        "gate": "TicketIssuer",
+        "outcome": "issued"
+      }
+    },
+    {
+      "id": "REQ-5",
+      "text": "Event organisers can update event listings, pricing, and seat capacity independently",
+      "target": {
+        "gate": "EventListingManager",
+        "outcome": "listing_updated"
+      }
+    },
+    {
+      "id": "REQ-6",
+      "text": "Customers can cancel a reservation and request a refund, releasing the seat back to available inventory",
+      "target": {
+        "gate": "InventoryReleaseManager",
+        "outcome": "seat_released"
+      }
+    },
+    {
+      "id": "REQ-7",
+      "text": "The platform tracks loyalty points for frequent attendees and applies rewards at checkout",
+      "target": {
+        "gate": "LoyaltyProcessor",
+        "outcome": "points_awarded"
+      }
+    },
+    {
+      "id": "REQ-8",
+      "text": "Customers can request a refund before event start time \u2014 refund payments are processed via authenticated payment processor",
+      "target": {
+        "gate": "RefundProcessor",
+        "outcome": "refund_confirmed"
+      }
+    }
+  ]
+}
