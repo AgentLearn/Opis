@@ -415,15 +415,20 @@ fn run_once(
     services: &[(ServiceSource, Option<LogNormal>)],
     routes_out: &HashMap<String, Vec<usize>>, // from-node → synapse indices
     subs: &mut Option<substitute::SubPool>,   // co-sim: real gate implementations
+    provider: &mut Option<substitute::BodyProvider>, // CA payload generator
     run_idx: usize,
 ) -> Result<HashMap<String, Option<f64>>> {
-    // pulse_avail[gate_name][concrete pulse_type] = earliest arrival time
-    let mut pulse_avail: HashMap<String, HashMap<String, f64>> = HashMap::new();
+    // pulse_avail[gate_name][concrete pulse_type] = (earliest arrival, body)
+    // body is Some(...) when the pulse was emitted by a substituted gate (real
+    // data); None means simulated origin — the body provider fills it lazily
+    // if a substituted gate consumes it.
+    let mut pulse_avail: HashMap<String, HashMap<String, (f64, Option<Value>)>> = HashMap::new();
 
     fn deliver(
-        avail: &mut HashMap<String, HashMap<String, f64>>,
+        avail: &mut HashMap<String, HashMap<String, (f64, Option<Value>)>>,
         syn: &Synapse,
         t_send: f64,
+        body: Option<&Value>,
         lib: Option<&LatencyLib>,
         rng: &mut StdRng,
     ) {
@@ -435,10 +440,10 @@ fn run_once(
             .entry(syn.to.clone())
             .or_default()
             .entry(syn.pulse_type.clone())
-            .or_insert(f64::INFINITY);
+            .or_insert((f64::INFINITY, None));
         let arrival = t_send + hop;
-        if arrival < *entry {
-            *entry = arrival;
+        if arrival < entry.0 {
+            *entry = (arrival, body.cloned());
         }
     }
 
@@ -446,7 +451,7 @@ fn run_once(
     for locus in &topo.source_loci {
         if let Some(idxs) = routes_out.get(locus) {
             for &i in idxs {
-                deliver(&mut pulse_avail, &topo.synapses[i], 0.0, lib, rng);
+                deliver(&mut pulse_avail, &topo.synapses[i], 0.0, None, lib, rng);
             }
         }
     }
@@ -480,7 +485,7 @@ fn run_once(
                 avail.as_ref().and_then(|a| {
                     a.iter()
                         .filter(|(t, _)| topo.matches(t, req))
-                        .map(|(_, &time)| time)
+                        .map(|(_, &(time, _))| time)
                         .fold(None, |acc: Option<f64>, t| Some(acc.map_or(t, |x: f64| x.min(t))))
                 })
             })
@@ -524,22 +529,27 @@ fn run_once(
         //    sample AND the outcome draw ─────────────────────────────────────
         let substituted = subs.as_ref().map_or(false, |p| p.is_substituted(&gate.name));
         if substituted {
-            let inputs: Vec<substitute::InputPulse> = avail
-                .as_ref()
-                .map(|a| {
-                    a.iter()
-                        .filter(|(t, &time)| {
-                            time <= join_time
-                                && gate.requires.iter().any(|req| topo.matches(t, req))
-                        })
-                        .map(|(t, &time)| substitute::InputPulse {
+            let mut inputs: Vec<substitute::InputPulse> = Vec::new();
+            if let Some(a) = avail.as_ref() {
+                for (t, (time, body)) in a.iter() {
+                    if *time <= join_time
+                        && gate.requires.iter().any(|req| topo.matches(t, req))
+                    {
+                        // Real body if the upstream was substituted; otherwise
+                        // ask CA's body provider to synthesize one.
+                        let body = match (body, provider.as_mut()) {
+                            (Some(b), _) => b.clone(),
+                            (None, Some(p)) => p.body_for(run_idx, t, *time, &gate.name)?,
+                            (None, None) => Value::Null,
+                        };
+                        inputs.push(substitute::InputPulse {
                             pulse_type: t.clone(),
-                            arrival_ms: time,
-                            body: Value::Null, // payload generators fill this (slice step 3)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                            arrival_ms: *time,
+                            body,
+                        });
+                    }
+                }
+            }
 
             let resp = subs
                 .as_mut()
@@ -577,18 +587,19 @@ fn run_once(
                         );
                     }
                 }
-                // Propagate what the real code actually emitted (may be a subset);
-                // if it returned no outputs, fall back to the declared flows.
-                let emitted: Vec<&String> = if resp.outputs.is_empty() {
-                    chosen.flows.iter().collect()
+                // Propagate what the real code actually emitted (with its real
+                // body); if it returned no outputs, fall back to declared flows
+                // with no body.
+                let emitted: Vec<(&String, Option<&Value>)> = if resp.outputs.is_empty() {
+                    chosen.flows.iter().map(|f| (f, None)).collect()
                 } else {
-                    resp.outputs.iter().map(|o| &o.pulse_type).collect()
+                    resp.outputs.iter().map(|o| (&o.pulse_type, Some(&o.body))).collect()
                 };
-                for pulse_type in emitted {
+                for (pulse_type, body) in emitted {
                     if let Some(idxs) = routes_out.get(&gate.name) {
                         for &i in idxs {
                             if &topo.synapses[i].pulse_type == pulse_type {
-                                deliver(&mut pulse_avail, &topo.synapses[i], fire_time, lib, rng);
+                                deliver(&mut pulse_avail, &topo.synapses[i], fire_time, body, lib, rng);
                             }
                         }
                     }
@@ -628,7 +639,7 @@ fn run_once(
             if let Some(idxs) = routes_out.get(&gate.name) {
                 for &i in idxs {
                     if &topo.synapses[i].pulse_type == pulse_type {
-                        deliver(&mut pulse_avail, &topo.synapses[i], fire_time, lib, rng);
+                        deliver(&mut pulse_avail, &topo.synapses[i], fire_time, None, lib, rng);
                     }
                 }
             }
@@ -702,6 +713,16 @@ fn main() -> Result<()> {
         }
         None => None,
     };
+    let mut provider: Option<substitute::BodyProvider> = match &cfg.substitutions_path {
+        Some(p) => {
+            let bp = substitute::body_provider_from_manifest(p)?;
+            if bp.is_some() {
+                eprintln!("[substitute] body provider active");
+            }
+            bp
+        }
+        None => None,
+    };
 
     // Pre-resolve service models and outgoing-synapse index
     let services: Vec<(ServiceSource, Option<LogNormal>)> = topo
@@ -725,7 +746,7 @@ fn main() -> Result<()> {
     let mut gate_miss:  HashMap<String, usize>    = HashMap::new();
 
     for run_idx in 0..cfg.runs {
-        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, run_idx)?;
+        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, &mut provider, run_idx)?;
         for (gate, ft) in result {
             match ft {
                 Some(t) => gate_times.entry(gate).or_default().push(t),

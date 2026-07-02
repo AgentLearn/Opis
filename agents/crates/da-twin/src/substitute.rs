@@ -196,3 +196,93 @@ impl Drop for SubPool {
         }
     }
 }
+
+// ── Body provider — CA's payload generator at the sim/real boundary ───────────
+//
+// One persistent subprocess (declared in the same manifest under
+// "body_provider") synthesizes schema-conformant payloads for pulses that
+// cross from the simulated world into a substituted gate. Pulses emitted by
+// substituted gates carry their REAL bodies through the twin; the provider
+// only fills the gaps where the upstream is simulated (or a source locus).
+//
+// Request:  {"v":1,"run":17,"pulse_type":"sandwich_payment","t_ms":100.2,
+//            "consumer":"PaymentProcessor"}
+// Response: {"body":{...}}
+
+pub struct BodyProvider {
+    proc_: SubProc,
+}
+
+impl BodyProvider {
+    pub fn spawn(cmd: &[String]) -> Result<Self> {
+        if cmd.is_empty() {
+            bail!("body_provider has empty 'cmd'");
+        }
+        let mut child = Command::new(&cmd[0])
+            .args(&cmd[1..])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .with_context(|| format!("spawning body provider ({:?})", cmd))?;
+        let stdin = BufWriter::new(child.stdin.take().context("provider stdin")?);
+        let stdout = BufReader::new(child.stdout.take().context("provider stdout")?);
+        Ok(BodyProvider { proc_: SubProc { child, stdin, stdout } })
+    }
+
+    pub fn body_for(
+        &mut self,
+        run: usize,
+        pulse_type: &str,
+        t_ms: f64,
+        consumer: &str,
+    ) -> Result<Value> {
+        let req = json!({
+            "v": PROTOCOL_VERSION,
+            "run": run,
+            "pulse_type": pulse_type,
+            "t_ms": t_ms,
+            "consumer": consumer,
+        });
+        serde_json::to_writer(&mut self.proc_.stdin, &req)?;
+        self.proc_.stdin.write_all(b"\n")?;
+        self.proc_.stdin.flush()?;
+
+        let mut line = String::new();
+        let n = self
+            .proc_
+            .stdout
+            .read_line(&mut line)
+            .context("reading response from body provider")?;
+        if n == 0 {
+            bail!("body provider closed its stdout (crashed?) at run {}", run);
+        }
+        let resp: Value = serde_json::from_str(line.trim())
+            .with_context(|| format!("parsing body provider response: {}", line.trim()))?;
+        resp.get("body")
+            .cloned()
+            .with_context(|| format!("body provider response missing 'body' for '{}'", pulse_type))
+    }
+}
+
+impl Drop for BodyProvider {
+    fn drop(&mut self) {
+        let _ = self.proc_.child.kill();
+        let _ = self.proc_.child.wait();
+    }
+}
+
+/// Parse the optional "body_provider" entry from the same manifest file.
+pub fn body_provider_from_manifest(path: &Path) -> Result<Option<BodyProvider>> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("reading substitutions manifest {:?}", path))?;
+    let v: Value = serde_json::from_str(&raw)?;
+    match v.get("body_provider").and_then(|b| b.get("cmd")).and_then(|c| c.as_array()) {
+        None => Ok(None),
+        Some(arr) => {
+            let cmd: Vec<String> =
+                arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+            Ok(Some(BodyProvider::spawn(&cmd)?))
+        }
+    }
+}
