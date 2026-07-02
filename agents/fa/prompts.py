@@ -44,6 +44,29 @@ Rules:
 """
 
 
+GATE_AMENDMENT_PROMPT = """You are FA, the Flow Architect agent in the Opis Dynamic Architecture system.
+
+Your task: AMEND an existing gate definition file according to an approved ADR
+decision. You will receive the current gate file and the ADR (whose Decision
+section names the chosen option). Apply exactly the decided change to the gate's
+contract and prose — nothing else.
+
+Rules:
+- Output the COMPLETE amended gate file (same structured-Markdown-with-YAML-
+  frontmatter format as the original). Output ONLY the file content.
+- Change only what the ADR decision requires. Preserve every other frontmatter
+  field and prose section as-is.
+- PRESERVE the `status:` and `confidence:` frontmatter lines unchanged — an
+  amended contract is still a draft until GA re-validates it.
+- All slot types must come from the provided slot_types index. Do not invent
+  new slot types.
+- Logic declarations use the flow-spec vocabulary where the frontmatter needs
+  them (e.g. `logic: {op: THRESHOLD, n: 2}`, `input_timeout_ms: <int>`).
+- KATA-AGNOSTIC: never mention the kata or any domain concept.
+- No ```markdown fences, no prose outside the file.
+"""
+
+
 GATE_INDEX_ROW_PROMPT = """Given this gate file, output a single markdown table row to append to the gates index.
 Format (pipe-separated, no leading/trailing pipes):
  <name> | <kind: gate|sentinel|regulator> | <comma-separated input slot types> | <comma-separated output slot types> | <true|false>
@@ -189,7 +212,8 @@ Reach for these whenever a gate's real behavior is "count/wait/give up," not "wa
 """
 
 
-def build_user_prompt(kata: str, slot_types: str, gates_index: str, version: int, previous_errors: str = "") -> str:
+def build_user_prompt(kata: str, slot_types: str, gates_index: str, version: int,
+                      previous_errors: str = "", adr_decisions: str = "") -> str:
     prompt = f"""## Kata
 {kata}
 
@@ -201,6 +225,12 @@ def build_user_prompt(kata: str, slot_types: str, gates_index: str, version: int
 
 ## Task
 Produce flow_v{version}.json for this kata.
+"""
+    if adr_decisions:
+        prompt += f"""
+## Decided ADRs for this kata (BINDING — follow their decisions and guidance;
+never re-propose a rejected gate)
+{adr_decisions}
 """
     if previous_errors:
         prompt += f"""

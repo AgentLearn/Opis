@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from .prompts import SYSTEM_PROMPT, GATE_GENERATION_PROMPT, build_user_prompt
+from .prompts import SYSTEM_PROMPT, GATE_GENERATION_PROMPT, GATE_AMENDMENT_PROMPT, build_user_prompt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "agents"
@@ -82,10 +82,57 @@ class FAAgent:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         return self.output_dir / "logs" / "fa" / ts
 
+    def _workspace_commit(self, message: str) -> None:
+        """Commit this run's results into the LOCAL workspace repo
+        (agents/output/ is its own git repo, never pushed — the product repo
+        on GitHub ignores it entirely). Agents manage this repo themselves;
+        a missing repo or git failure is reported but never fails the run."""
+        import subprocess
+        root = self.output_dir.parent  # agents/output
+        if not (root / ".git").exists():
+            print("  (workspace repo not initialised — skipping local commit; "
+                  "run `git init` in agents/output to enable)")
+            return
+        try:
+            subprocess.run(["git", "-C", str(root), "add", "-A"],
+                           check=True, capture_output=True, timeout=30)
+            r = subprocess.run(["git", "-C", str(root), "commit", "-m", message],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                print(f"  workspace repo: committed — {message}")
+            elif "nothing to commit" in (r.stdout + r.stderr):
+                print("  workspace repo: nothing new to commit")
+            else:
+                print(f"  workspace repo: commit failed — {r.stderr.strip()[:200]}")
+        except Exception as e:  # never fail the run over local bookkeeping
+            print(f"  workspace repo: git unavailable — {e}")
+
     # ── LLM call ──────────────────────────────────────────────────────────
 
+    def _decided_adr_context(self, max_chars: int = 6000) -> str:
+        """Concatenate the Context + Decision of every decided (processed) ADR
+        for this kata. Injected into every flow iteration so decisions bind
+        future drafts too — a rejected proposal must never be re-proposed."""
+        adr_dir = self._adr_dir()
+        if not adr_dir.exists():
+            return ""
+        chunks = []
+        for path in sorted(adr_dir.glob("*.md")):
+            if not self._processed_marker(path).exists():
+                continue
+            content = path.read_text()
+            ctx = re.search(r"## Context\s*\n(.*?)(?=\n## )", content, re.DOTALL)
+            dec = re.search(r"## Decision\s*\n(.*)", content, re.DOTALL)
+            if dec:
+                chunks.append(
+                    f"### {path.stem}\nContext: {ctx.group(1).strip() if ctx else '(none)'}\n"
+                    f"Decision: {dec.group(1).strip()}")
+        text = "\n\n".join(chunks)
+        return text[:max_chars]
+
     def _call_llm(self, kata: str, slot_types: str, gates_index: str, errors: str = "") -> str:
-        user_prompt = build_user_prompt(kata, slot_types, gates_index, self.version, errors)
+        user_prompt = build_user_prompt(kata, slot_types, gates_index, self.version,
+                                        errors, self._decided_adr_context())
         response = self.client.messages.create(
             model=MODEL,
             max_tokens=8192,
@@ -314,6 +361,33 @@ class FAAgent:
         )
         return response.content[0].text.strip()
 
+    def _generate_amended_gate_file(self, existing_md: str, adr_content: str) -> str:
+        """Call LLM to apply an approved ADR's decision to an EXISTING gate file."""
+        slot_types = (AGENT_DIR / "slot_types" / "index.md").read_text()
+        response = self.client.messages.create(
+            model=MODEL,
+            max_tokens=2048,
+            system=GATE_AMENDMENT_PROMPT,
+            messages=[{"role": "user", "content":
+                f"## Slot Types\n{slot_types}\n\n## Current Gate File\n{existing_md}"
+                f"\n\n## Approved ADR (apply its Decision)\n{adr_content}"}],
+        )
+        return response.content[0].text.strip()
+
+    def _replace_index_row(self, index_path: Path, name: str, new_row: str) -> None:
+        """Replace the index table row for `name` in place (append if absent)."""
+        lines = index_path.read_text().splitlines()
+        replaced = False
+        for i, line in enumerate(lines):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if cells and cells[0] == name:
+                lines[i] = f"| {new_row} |"
+                replaced = True
+                break
+        if not replaced:
+            lines.append(f"| {new_row} |")
+        index_path.write_text("\n".join(lines) + "\n")
+
     def _extract_gate_name(self, gate_md: str) -> str | None:
         """Extract name from YAML frontmatter."""
         match = re.search(r"^name:\s*(\S+)", gate_md, re.MULTILINE)
@@ -342,6 +416,17 @@ class FAAgent:
         for adr_path, adr_content in approved:
             print(f"  Processing approved ADR: {adr_path.name}")
             marker = self._processed_marker(adr_path)
+
+            # A decision can REJECT the proposal outright ("Rejected" leads the
+            # Decision body). No gate is generated; the decision's guidance
+            # still reaches FA because processed ADRs remain in its context.
+            decision = re.search(r"## Decision\s*\n(.*)", adr_content, re.DOTALL)
+            decision_head = decision.group(1).strip()[:120].lower() if decision else ""
+            if decision_head.lstrip("*# ").startswith("rejected"):
+                print(f"    Decision: rejected — no gate will be created")
+                marker.write_text("status: rejected\n")
+                continue
+
             gate_md = self._generate_gate_file(adr_content)
             name = self._extract_gate_name(gate_md)
             if not name:
@@ -350,8 +435,22 @@ class FAAgent:
 
             gate_file = gates_dir / f"{name}.md"
             if gate_file.exists():
-                print(f"    Gate {name} already exists — skipping")
-                marker.write_text(f"gate: {name}\nstatus: already-existed\n")
+                # Approved decision targets an EXISTING gate: this is a contract
+                # amendment, not a creation. Silently skipping here once dropped
+                # an approved decision on the floor (ADR-010, delivery_router).
+                print(f"    Gate {name} exists — applying contract amendment")
+                amended = self._generate_amended_gate_file(
+                    gate_file.read_text(), adr_content)
+                if self._extract_gate_name(amended) != name:
+                    print(f"    Amendment renamed the gate — rejected "
+                          f"(not marked processed, will retry next run)")
+                    continue
+                gate_file.write_text(amended)
+                self._replace_index_row(
+                    index_path, name, self._generate_index_row(amended))
+                print(f"    Gate amended: {gate_file.name}; index row refreshed.")
+                marker.write_text(f"gate: {name}\nstatus: amended\n")
+                created += 1
                 continue
 
             gate_file.write_text(gate_md)
@@ -614,6 +713,9 @@ class FAAgent:
                     self._write_log(log_dir, log)
                     self._write_proofs(proof_results)
                     self._write_tests(parsed, proof_results)
+                    self._workspace_commit(
+                        f"FA: {self.kata_name} flow_v{self.version} — "
+                        f"{len(proof_results)} requirement(s) proved, conformant")
                     return
 
                 fail_parts = []

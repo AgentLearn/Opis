@@ -1245,13 +1245,23 @@ def check_gate_logic(spec: dict) -> tuple[list[str], list[str]]:
                 f"— move to requires (mandatory) or optional, not both"
             )
 
-        # ── input_timeout_ms keys ⊆ requires ──────────────────────────────────
-        timeout_keys = set(gspec.get("input_timeout_ms", {}).keys())
-        unknown_timeout = timeout_keys - set(requires)
-        if unknown_timeout:
-            warnings.append(
-                f"gate '{gname}': input_timeout_ms references types not in requires: "
-                f"{sorted(unknown_timeout)} — these timeouts have no effect"
+        # ── input_timeout_ms: scalar (uniform) or dict (per-input) ────────────
+        # SYSTEM_PROMPT documents the scalar form (`input_timeout_ms: <int>`);
+        # the dict form {input_type: ms} allows per-input overrides. Anything
+        # else is a structural error — a verifier must report, never crash
+        # (first triggered 2026-07-02 by the amended delivery_router).
+        timeout_spec = gspec.get("input_timeout_ms")
+        if isinstance(timeout_spec, dict):
+            unknown_timeout = set(timeout_spec.keys()) - set(requires)
+            if unknown_timeout:
+                warnings.append(
+                    f"gate '{gname}': input_timeout_ms references types not in requires: "
+                    f"{sorted(unknown_timeout)} — these timeouts have no effect"
+                )
+        elif timeout_spec is not None and not isinstance(timeout_spec, (int, float)):
+            errors.append(
+                f"gate '{gname}': input_timeout_ms must be an integer (uniform) "
+                f"or an object mapping input types to ms — got {type(timeout_spec).__name__}"
             )
 
         # ── logic field ────────────────────────────────────────────────────────

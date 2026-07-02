@@ -19,7 +19,7 @@ Demotion is possible: evidence from any lower stage can invalidate the stage abo
 | order_intake | gate | order, auth_token | accepted_order, rejected_order | true |
 | producer_submitter | gate | accepted_order, routing_decision | command, ack | true |
 | pickup_estimator | gate | accepted_order, location | estimate | false |
-| delivery_router | gate | order, location | routing_decision | false |
+| delivery_router | gate | order, location, query_response | routing_decision | false |
 | driver_dispatcher | gate | accepted_order, routing_decision, tracking_update | command, tracking_update, event | true |
 | menu_manager | gate | menu_update, auth_token | ack, inventory_update | true |
 | loyalty_processor | gate | payment_confirmed, auth_token, reward | reward, notification | true |
