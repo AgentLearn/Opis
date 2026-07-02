@@ -676,9 +676,10 @@ def main() -> None:
         idx = sys.argv.index("--gates-dir")
         gates_dir = Path(sys.argv[idx + 1])
     else:
-        # default: <repo_root>/agents/gates, derived from
-        # agents/output/<kata>/flow/flow_vN.json → parents[3] == agents/
-        gates_dir = flow_path.resolve().parents[3] / "gates"
+        # default: <repo_root>/agents/gates — anchored to THIS file's repo
+        # (flows live in workspace/<kata>/flow/ since the workspace split, so
+        # deriving the gates repo from the flow path no longer works)
+        gates_dir = Path(__file__).resolve().parents[2] / "agents" / "gates"
 
     spec = eval_mod.load_spec(flow_path)
     print(c("\nopis-proof  ", BOLD) + c(str(flow_path.resolve()), YELLOW))

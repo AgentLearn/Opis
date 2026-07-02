@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import proof as proof_mod  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FLOW_PATH = REPO_ROOT / "agents" / "output" / "silicon_sandwiches" / "flow" / "flow_v1.json"
+FLOW_PATH = REPO_ROOT / "workspace" / "silicon_sandwiches" / "flow" / "flow_v1.json"
 GATES_DIR = REPO_ROOT / "agents" / "gates"
 
 PASS = "\033[32mPASS\033[0m"

@@ -19,10 +19,10 @@ target/
 tools/rust-validator/
 
 # TWO-REPO SPLIT (2026-07-02): this repo tracks the product — agents,
-# verifiers, twin, gate library, katas, docs. agents/output/ is the agents'
+# verifiers, twin, gate library, katas, docs. workspace/ (repo root) is the agents'
 # local WORKSPACE: its own separate git repo (never pushed), where runs,
 # flows, ADRs, logs, and CA ephemerals live. regress.py reads it from the
 # filesystem, so the golden corpus lives there and regress stays a local test.
-agents/output/
+workspace/
 docker-compose*.yml
 compose.yaml

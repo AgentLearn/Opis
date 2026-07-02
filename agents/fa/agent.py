@@ -35,7 +35,7 @@ class FAAgent:
     def __init__(self, kata_path: Path):
         self.kata_path = kata_path
         self.kata_name = kata_path.stem
-        self.output_dir = AGENT_DIR / "output" / self.kata_name
+        self.output_dir = REPO_ROOT / "workspace" / self.kata_name
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
         self.client = anthropic.Anthropic(
             http_client=httpx.Client(verify=False, proxy=proxy)
@@ -84,14 +84,14 @@ class FAAgent:
 
     def _workspace_commit(self, message: str) -> None:
         """Commit this run's results into the LOCAL workspace repo
-        (agents/output/ is its own git repo, never pushed — the product repo
-        on GitHub ignores it entirely). Agents manage this repo themselves;
-        a missing repo or git failure is reported but never fails the run."""
+        (workspace/ at the repo root is its own git repo, never pushed — the
+        product repo on GitHub ignores it entirely). Agents manage this repo
+        themselves; a missing repo or git failure never fails the run."""
         import subprocess
-        root = self.output_dir.parent  # agents/output
+        root = self.output_dir.parent  # workspace/
         if not (root / ".git").exists():
             print("  (workspace repo not initialised — skipping local commit; "
-                  "run `git init` in agents/output to enable)")
+                  "run `git init` in workspace/ to enable)")
             return
         try:
             subprocess.run(["git", "-C", str(root), "add", "-A"],

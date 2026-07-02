@@ -507,9 +507,9 @@ agents/
     logistics/
       archetypes.md
 
-  output/                         ← regenerated test residue: katas re-run from
-    <kata_name>/                    blank slate; flows are regression baselines,
-      flow/                         ADRs/logs document past runs, no authority
+  (repo root)/workspace/          ← agents' LOCAL workspace — its own git repo,
+    <kata_name>/                    never pushed; agents commit their runs here;
+      flow/                         flows are regression baselines, no authority
         flow_v1.json              ← first clean passing spec (internal iterations are not versioned)
         flow_v2.json              ← new version only on: kata change, ADR approval, explicit re-run
         flow_current -> flow_v2   ← symlink to latest passing version

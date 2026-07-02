@@ -76,10 +76,10 @@ Every committed flow passed the full gate when it was written, so the set of com
 
 ```bash
 # structural analysis of a verified flow
-python tools/opis-eval/eval.py agents/output/ripple_rides/flow/flow_v2.json
+python tools/opis-eval/eval.py workspace/ripple_rides/flow/flow_v2.json
 
 # reconstruct the witness path for every requirement in that flow
-python tools/opis-eval/proof.py agents/output/ripple_rides/flow/flow_v2.json
+python tools/opis-eval/proof.py workspace/ripple_rides/flow/flow_v2.json
 
 # re-verify the entire golden corpus + gate-index consistency
 python tools/opis-eval/regress.py
@@ -115,7 +115,7 @@ FA iterates against a scratch file and only promotes a real `flow_vN.json` once 
 
 Each was independently re-verified by running the analyzer and prover directly against the committed file, not by trusting the agent's own success report.
 
-Everything under `agents/output/` is **regenerated test residue**: katas re-run from a blank slate, and the committed flows are kept in git only as regression baselines for `regress.py`. The ADRs, logs, and defect histories alongside them document past runs — they are not design artifacts and carry no authority.
+Everything under `workspace/` (repo root, ignored here) is the agents' **local workspace — its own git repo, never pushed**: katas re-run from a blank slate, flows serve as regression baselines for `regress.py` (a local test), and the agents commit their own runs there. ADRs, logs, and defect histories document past runs — not design artifacts, no authority.
 
 ---
 
@@ -135,7 +135,7 @@ agents/
   gates/             # kata-agnostic gate library + index.md
   slot_types/        # computing-level type definitions
   katas/, input/     # architecture problems
-  output/<kata>/     # regenerated test residue: regression-baseline flows + run logs
+workspace/<kata>/    # agents' local workspace repo (ignored): flows, ADRs, run logs
 tools/
   opis-eval/         # eval.py, proof.py, regress.py
 ```

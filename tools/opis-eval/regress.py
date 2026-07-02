@@ -36,7 +36,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
 GATES_DIR = REPO_ROOT / "agents" / "gates"
-OUTPUT_DIR = REPO_ROOT / "agents" / "output"
+OUTPUT_DIR = REPO_ROOT / "workspace"
 
 
 def _load(name: str, path: Path):
