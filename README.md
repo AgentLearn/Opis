@@ -8,17 +8,17 @@ Most "AI architect" tooling ends at generation: the model emits a diagram or a d
 
 > **Conceptual foundation:** Opis is one concrete answer to the argument in [*AI Coding Design Patterns?*](https://zarkob.substack.com/p/ai-coding-design-patterns) — that as AI moves code creation to the requirements level, we validate agent-built systems either with an *LLM-as-judge* (easy to iterate, unreliable) or with a *DSL/ontology whose evaluation is constructed via graph algorithms* (harder to build, reliable to reason with in code). **Opis is a deliberate bet on the ontology branch:** the pulse-network is the ontology, and `opis-proof`'s fixed-point reachability with real witness paths is that graph-algorithm evaluation, made concrete.
 
-### The bigger arc: closing the loop across three levels
+### The bigger arc: two loops and an instrument
 
-A flow is only the top level. The full system Opis is building toward is a set of **nested, self-closing verification loops** run by cooperating agents:
+A flow is only the top level. The full system Opis is building toward is **two nested, self-closing verification loops**, plus an instrument that grounds them:
 
-- **FA — Flow Architect** *(built)* — designs the flow-level topology; verified by `opis-eval` + `opis-proof`.
-- **GA — Gate Architect** *(next)* — each gate is itself a sub-topology. GA designs and verifies a gate's internals so they honor the timing and behavior the flow-level contract claims.
-- **CA — Code Architect** *(next)* — verifies a real implementation of a gate actually accepts and emits the declared types within the declared bounds.
+- **FA — Flow Architect** *(built)* — the topology loop. Designs the flow-level pulse network; verified by `opis-eval` + `opis-proof`.
+- **GA — Gate Architect** *(next)* — the contract loop, and the one that tightens the Opis description itself. GA owns the gate library: it designs and verifies each gate's internals, validates timing against the Monte-Carlo twin, and promotes or demotes contracts as evidence accumulates. Every gate contract has exactly one owner — GA.
+- **CA — Coding Agent** *(next)* — not a peer loop but the **dev lead** serving GA: flow-scoped, not gate-scoped, because measured behavior is a reaction of the whole system — per-gate PDs don't compose (one validator's decision logic changes every distribution downstream of it). CA translates gates + ADRs into shared per-archetype message schemas (a contract that can't be translated into usable messages is falsified before any code runs), implements gates against them, emulates non-software subsystems statistically, and runs the flow in the co-simulation twin: real code where code will exist, statistics where the world is. Sandbox measurements *falsify* contracts confidently but *validate* them only weakly — lower bounds, never production numbers.
 
-The point is that these loops *compose and feed back*: a CA failure invalidates a gate, which invalidates any flow that relied on it — and that signal propagates back up so the responsible agent re-designs, not a human. Closing that loop end-to-end is the actual research contribution. FA and its verification stack are the first loop, standing on their own and fully working; GA and CA are what turn three separate checkers into one coherent, self-correcting system.
+The loops *compose and feed back*: CA evidence that falsifies a contract demotes the gate, which invalidates any flow that relied on it — and that signal propagates back up so the responsible agent re-designs, not a human. Closing that path end-to-end is the actual research contribution. FA and its verification stack stand on their own and are fully working; GA is what turns the separate checkers into one coherent, self-correcting system.
 
-Encircling all three is a fourth loop that closes differently: **real-use feedback.** The inner loops shift *correctness* left — they settle valid, safe, and efficient before a line runs. But *useful* can only be judged once the system meets real participants, and that judgment doesn't return a pass/fail, it returns a **revision.** Observed usage sends a signal all the way back out: sometimes the architecture was wrong for the right problem (regenerate the flow), sometimes the problem itself was wrong (rewrite the kata — the requirements "code"). This is the loop that makes the requirements themselves editable, not just the design beneath them, and it's the one no graph algorithm can close on its own.
+Encircling it all is an outer loop that closes differently: **real-use feedback.** The inner loops shift *correctness* left — they settle valid, safe, and efficient before a line runs. But *useful* can only be judged once the system meets real participants, and that judgment doesn't return a pass/fail, it returns a **revision.** Observed usage sends a signal all the way back out: sometimes the architecture was wrong for the right problem (regenerate the flow), sometimes the problem itself was wrong (rewrite the kata — the requirements "code"). This is the loop that makes the requirements themselves editable, not just the design beneath them, and it's the one no graph algorithm can close on its own.
 
 **This is a work in progress, and the real proof is use.** The katas here are internal evals — a controlled way to force each new primitive into existence. The bar Opis is aiming at isn't "passes its own tests"; it's *being used to design and verify a system someone actually ships.* That's the milestone that matters, and it isn't reached yet.
 
@@ -121,7 +121,7 @@ Everything under `agents/output/` is **regenerated test residue**: katas re-run 
 
 ## The gate library is seed stock — refining it is the research
 
-Every gate contract carries a lifecycle `status` (`draft` → `specified` → `simulated` → `measured`) and a `confidence` provenance tag (`llm-estimate` | `twin-validated` | `sourced`) in its frontmatter. The current 14 contracts were proposed one-shot during early kata runs: they exist to bootstrap the loops, and all of them are tagged `llm-estimate`.
+Every gate contract carries a lifecycle `status` (`draft` → `specified` → `simulated` → `measured`; the last meaning *sandbox-measured* — a feasibility verdict and lower bounds from CA, not production validation) and a `confidence` provenance tag (`llm-estimate` | `twin-validated` | `sourced`) in its frontmatter. The current 14 contracts were proposed one-shot during early kata runs: they exist to bootstrap the loops, and all of them are tagged `llm-estimate`.
 
 A contract is **promoted only with evidence** — grounding in real-life architectures (published benchmarks, named analogs like payment authorization flows or the circuit-breaker pattern) or high-quality sandboxed twin runs. Promotion is iterative: **ADR → specs → implementation**, where each stage can also *demote* the one above it (a twin run that falsifies a window reopens the spec; a measured implementation that contradicts the simulation reopens the ADR). Building good gate descriptions and building the refinement process that produces them are the same open research question, worked at the same time.
 
@@ -144,11 +144,11 @@ tools/
 
 ## Status & roadmap
 
-This is an active research prototype, not a product — see [the bigger arc](#the-bigger-arc-closing-the-loop-across-three-levels) for the full vision.
+This is an active research prototype, not a product — see [the bigger arc](#the-bigger-arc-two-loops-and-an-instrument) for the full vision.
 
 - **Built and working:** the pulse-network model, the `opis-eval` / `opis-proof` / `opis-regress` verification stack, the Rust Monte-Carlo **twin** (`da-twin` + `twin_check`: subtype- and logic-aware simulation, latency library, advisory timing norms), and **FA** — the flow-level loop, closed end-to-end.
 - **Seed stock, being refined:** the gate library — 14 draft contracts tagged `llm-estimate`, awaiting promotion through the ADR → specs → implementation cycle (see above).
-- **In progress — closing the next loops:** **GA** (gate-level: proves each gate's internal sub-topology honors its declared timing/behavior; contract verifier and golden internals exist, the agent loop and twin-driven timing tuner do not yet) and **CA** (code-level: checks a real implementation accepts/emits the right types within bounds), plus the feedback path that lets a lower-level failure invalidate and re-trigger the levels above it. The test scaffolding already names these layers.
+- **In progress — closing the contract loop:** **GA** (proves each gate's internal sub-topology honors its declared timing/behavior; contract verifier, golden internals, twin, and advisory norms exist — the agent loop and twin-driven timing tuner do not yet), with **CA** as dev lead (schemas → Rust gate implementations → co-sim runs with statistically emulated externals → feasibility verdicts + measured lower bounds), plus the feedback path that lets lower-level evidence demote and re-trigger the levels above it. First vertical slice: `silicon_sandwiches` in the co-sim twin.
 - **The outer loop:** real-use feedback — a path from observed usage back into the system that can regenerate the architecture or rewrite the kata. This is what closes *usefulness*, and it's the loop no static check can substitute for.
 - **The real milestone:** applying the closed loop to a system that actually gets used, not just katas.
 

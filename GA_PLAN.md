@@ -1,9 +1,12 @@
 # GA — Gate Architect: implementation plan
 
-Second loop in the FA → GA → CA arc. FA proved a flow's topology satisfies its
-requirements; GA proves each gate's *internals* honor the timing and behavior the
-flow-level contract claims — structurally (eval/proof) and dynamically (Monte Carlo
-twin + an optimization loop over timing parameters).
+The second and final agent loop (FA = topology loop; GA = contract loop; CA is
+not a peer loop but the dev lead serving GA — flow-scoped, ephemeral outputs).
+FA proved a flow's topology satisfies its requirements; GA proves each gate's
+*internals* honor the timing and behavior the flow-level contract claims —
+structurally (eval/proof) and dynamically (Monte Carlo twin + an optimization
+loop over timing parameters). GA solely owns the gate library: it promotes and
+demotes each contract's lifecycle `status` as evidence accumulates.
 
 **Goal:** a committed flow is not just *correct* (requirements proved, contracts
 honored) but *performant* — end-to-end deadlines met at p95 under realistic
@@ -85,8 +88,9 @@ confidence: sourced    # sourced | llm-estimate (unverified)
 Population order: GA web-searches published benchmark figures first; where nothing
 credible is found, the LLM proposes an estimate explicitly tagged
 `llm-estimate` — never silently mixed with sourced numbers. When CA later measures
-real implementations, measured values replace both (per OpisDescription: twin
-switches from simulation to instrumentation).
+real implementations in the co-sim twin, those numbers enter as *lower bounds*:
+they falsify estimates confidently but validate only weakly (`measured` =
+sandbox-measured, never production-validated).
 
 ## Phase 5 — RL timing-tuning loop
 
@@ -100,8 +104,13 @@ The twin is the environment; the policy tunes timing parameters.
   interface is RL-shaped (state, action, reward, episodes) so a real policy can
   drop in later without rework.
 - **Output:** proposed timing params + evidence (before/after fire%, p95 vs
-  window), surfaced as an ADR-style proposal — a human or FA accepts it, the
-  tuner never silently rewrites a contract.
+  window), surfaced as an ADR-style proposal — the User accepts it and GA (sole
+  contract owner) applies it; the tuner never silently rewrites a contract.
+- **Role in the lifecycle:** the tuner is the *promotion mechanism* — its
+  converged, re-verified params are what earn a contract `twin-validated`
+  confidence. Proposals target gate *templates*; the katas are the blank-slate
+  falsification harness a proposal must survive (all flows using the template
+  stay green).
 
 ## Phase 6 — GA agent
 

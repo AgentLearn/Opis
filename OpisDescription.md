@@ -114,15 +114,24 @@ FA iterates, producing a new versioned flow spec (`flow_vN.json`) each pass, unt
 
 ### GA — Gate Architect
 
-GA takes each gate selected by FA and parameterizes its internals. GA runs Monte Carlo simulations to produce probability distributions (PDs) for gate behavior — latency, throughput, failure rates. When CA has already implemented a gate, GA uses CA's real measured PDs instead of simulated ones.
+GA is the contract loop — the loop that tightens the Opis description itself. GA solely owns the gate library: every contract has exactly one owner. GA takes each gate selected by FA, designs and verifies its internals, and runs Monte Carlo simulations (the twin) to produce probability distributions (PDs) for gate behavior — latency, throughput, failure rates. GA promotes or demotes each contract's lifecycle `status` as evidence accumulates. When CA has produced sandbox measurements, GA weighs those measured PDs against the simulated ones.
 
-GA iterates until all gates are fully parameterized and their PDs are within the bounds required by the flow. GA proposes tests for its own output and for CA.
+GA iterates until all gates are fully parameterized and their PDs are within the bounds required by the flow. GA proposes tests for its own output and for CA runs.
 
 GA's ADR context excludes gate-needed ADRs (the `NNN_gate_needed_*.md` proposals already resolved at the flow level) regardless of who raised them. All other ADRs — from FA or directly from the User — are in scope for GA.
 
-### CA — Coding Agent (Lead Dev)
+### CA — Coding Agent (Dev Lead)
 
-CA implements gates as actual code, running in a sandbox. CA's implementation produces real PDs that feed back into GA, replacing Monte Carlo estimates with measured reality. CA proposes tests for its own output.
+CA is not a peer loop — it is the dev lead serving GA, and its unit of work is a **flow**, not a gate. Measured behavior is a reaction of the whole software system: per-gate PDs don't compose by formula, because one gate's decision logic changes every distribution downstream of it. Testing a gate in isolation is therefore of limited use; the proof of an Opis flow is the full implementation running in the co-simulation twin.
+
+CA's task, per flow:
+
+1. **Translate** gates + ADRs into shared message schemas — one schema per archetype, subtype-extends-parent, both synapse endpoints agree. A contract that cannot be translated into usable messages is falsified before any code runs.
+2. **Implement** each gate in Rust against those schemas (gates are the computational path; agents stay Python).
+3. **Emulate** non-software subsystems (kitchens, drivers, customers, external services) statistically — payload generators producing schema-conformant content with latency-library timing.
+4. **Run** the flow in the one co-sim twin environment with progressive substitution: real gate code plugged in place of simulated stand-ins (subprocess, JSON over stdio; the twin keeps the virtual clock, sends inputs at fire time, receives the actual outcome + payloads + measured service time, and propagates the real decision instead of a sampled one).
+
+Sandbox measurements falsify contracts confidently but validate them only weakly — `measured` status means sandbox-measured lower bounds, never production validation.
 
 ### Iteration Loop
 
@@ -130,17 +139,17 @@ CA implements gates as actual code, running in a sandbox. CA's implementation pr
 Kata
   │
   ▼
-FA  ──iterates──► flow clean?  ──yes──► GA
-  ▲                                      │
-  │                              iterates until gates clean
+FA  ──iterates──► flow clean?  ──yes──► GA ──iterates──► gates clean?
+  ▲                                    ▲ │
+  │                            evidence│ │contract
+  │                             (PDs,  │ │
+  │                          bounds,   │ ▼
+  │                        infeasible) CA (schemas → Rust gates → co-sim runs)
   │                                      │
-  │                                      ▼
-  │                              CA  ──iterates──► code clean?
-  │                                                     │
-  │◄── unsolvable ◄─────────────────────────────────────┤
-                                                         │
-                                                    real PDs ──► GA
+  │◄── unsolvable / contract demoted ◄───┘
 ```
+
+GA drives; CA is engaged per flow and reports back. Evidence that falsifies a contract demotes the gate, which invalidates flows relying on it — the signal propagates up to FA, which re-designs.
 
 When any agent cannot resolve a problem: it notifies the agent above with a structured description of what is missing. When any agent faces a decision: it creates an ADR with proposals and waits for User approval before continuing.
 
@@ -475,7 +484,10 @@ Each domain (fintech, logistics, healthcare) the system processes is training da
 agents/
   fa/                              ← FA agent code (Python)
   ga/                              ← GA agent code (Python, later)
-  ca/                              ← CA agent code (Python, later)
+  ca/                              ← CA dev-lead agent code (Python, later); CA *outputs*
+                                     (schemas, Rust gate crates, docker compose, the whole
+                                     runnable stack) are EPHEMERAL — regenerated per run,
+                                     never checked in; only evidence reports persist
 
   input/                          ← drop kata .md here to trigger FA
 
@@ -551,7 +563,7 @@ The two layers communicate through files — agents write specs, the sim reads t
 | `opis-eval` | Python | `tools/opis-eval/eval.py` | Static structural analysis: reachability, dead gates, cycles, sentinel coverage, cascade timing, cardinality ceilings, slot isolation |
 | `fa` | Python | `agents/fa/` | FA agent: kata → versioned flow spec, gate selection and proposal |
 | `ga` | Python | `agents/ga/` | GA agent: gate parameterization, PD management (later) |
-| `ca` | Python | `agents/ca/` | CA agent: code generation in target language (later) |
+| `ca` | Python | `agents/ca/` | CA dev-lead agent: schema translation + Rust gate generation + co-sim runs; outputs ephemeral (later) |
 | `opis-twin` | Rust | `agents/crates/da-twin/` | Monte Carlo simulation: p50/p95/p99 per gate (later) |
 | `da-core` | Rust | `agents/crates/da-core/` | Core Opis data model consumed by sim (later) |
 | `katas/` | — | `agents/katas/` | Architectural katas as inputs |
@@ -564,7 +576,7 @@ Run eval: `python tools/opis-eval/eval.py <spec.json>`
 
 Monte Carlo simulation with realistic latency distributions on synapses. Models slow wifi, rush-hour traffic, domain-specific variability. Output: p50/p95/p99 per gate, saturation curves, weak-link identification. GA uses twin output to validate that parameterized gates meet the flow's timing requirements.
 
-When CA has implemented a gate, real measured PDs replace MC estimates — the twin switches from simulation to instrumentation for those gates.
+When CA has implemented a gate, sandbox-measured PDs supplement MC estimates as lower bounds — the twin switches from pure simulation to instrumentation-grounded simulation for those gates (progressive substitution: real code where code will exist, statistical emulation where the world is). Sandbox numbers falsify contracts confidently but validate them only weakly; production-grade PDs come only from the real-use outer loop.
 
 Synapse latency is log-normal by default (matches both local and network latency empirically). Parameters: `p50` and `p99` measured from real traffic or MC.
 
@@ -607,6 +619,6 @@ Intel Loihi / IBM TrueNorth execute pulse graphs natively. Validation that takes
 
 Opis is a platform in its own right. The specification language plus opis-eval plus opis-twin form a complete platform for designing, validating, and evolving any system whose structure should respond to its own usage — software services, logistics networks, hospital triage, financial workflows.
 
-The FA/GA/CA agent hierarchy means a domain expert can describe what the system must do (kata) and the agents produce a validated, simulated, and implemented system — with every decision traceable to an ADR the User approved.
+The two agent loops (FA for topology, GA for contracts) plus CA as dev lead mean a domain expert can describe what the system must do (kata) and the agents produce a validated, simulated, and feasibility-tested system — with every decision traceable to an ADR the User approved.
 
 Dog-food product: the **Opis UI editor**, designed and built using Opis itself.

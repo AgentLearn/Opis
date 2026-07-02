@@ -17,3 +17,10 @@ target/
 
 # rust-validator carries its own .git — versioned separately for now
 tools/rust-validator/
+
+# CA outputs are ephemeral — regenerated per run, never checked in
+# (schemas, Rust gate crates, docker compose, the whole runnable stack;
+#  only evidence reports persist, and those live with GA)
+agents/output/*/ca/
+docker-compose*.yml
+compose.yaml
