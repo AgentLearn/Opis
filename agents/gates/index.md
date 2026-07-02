@@ -17,3 +17,11 @@ agent generation, through the binding-ADR process.
 
 | gate | kind | input slot types | output slot types | auth_required |
 |------|------|-------------------|-------------------|---------------|
+| auth_token | sentinel | auth_request, query_response | query, auth_token, event | false |
+| payment_authorizer | regulator | payment, reward | payment_confirmed, payment_failed | false |
+| queue_based_estimator | gate | query, location | estimate | false |
+| routing_decision_aggregator | gate | query, query_response | query, routing_decision | false |
+| routed_command_dispatcher | gate | accepted_order, routing_decision, location | command, notification | false |
+| assignment_tracker | gate | command | tracking_update, notification | false |
+| scoped_catalogue_writer | gate | menu_update, auth_token, query_response | event, notification, query | true |
+| reward_accumulator | gate | event, query | reward | false |
