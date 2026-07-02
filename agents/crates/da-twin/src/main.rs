@@ -3,6 +3,8 @@
 /// Usage:
 ///   da-twin --spec <flow.json> [--runs N] [--seed N] [--latencies <latencies.json>]
 ///           [--report <twin_report.json>] [--diagnose <patterns-dir>]
+///           [--substitutions <subs.json>]   (co-sim: real gate implementations
+///                                            as subprocesses — see substitute.rs)
 ///
 /// Consumes a flow spec directly (loci/gates/synapses — the same format
 /// opis-eval reads; the old separate "composed.json" is no longer required).
@@ -33,6 +35,7 @@ use std::{
 };
 
 mod diagnose;
+mod substitute;
 
 // ── Topology model ─────────────────────────────────────────────────────────────
 
@@ -58,7 +61,8 @@ pub enum LogicOp {
 
 #[derive(Debug)]
 pub struct OutcomeModel {
-    flows: Vec<String>,  // pulse types emitted when this outcome is chosen
+    name: Option<String>, // outcome label — substituted gates select by name
+    flows: Vec<String>,   // pulse types emitted when this outcome is chosen
     weight: f64,
 }
 
@@ -174,10 +178,11 @@ impl Topology {
                 None => vec![],
                 Some(arr) => {
                     let mut total_w = 0.0f64;
-                    let mut raw: Vec<(Vec<String>, f64)> = arr
+                    let mut raw: Vec<(Option<String>, Vec<String>, f64)> = arr
                         .iter()
                         .filter_map(|ov| {
                             if let Some(obj) = ov.as_object() {
+                                let name = obj.get("outcome").and_then(|x| x.as_str()).map(String::from);
                                 let flows = obj
                                     .get("flows")
                                     .and_then(|f| f.as_array())
@@ -189,10 +194,10 @@ impl Topology {
                                     .unwrap_or_default();
                                 let w = obj.get("weight").and_then(|w| w.as_f64()).unwrap_or(1.0);
                                 total_w += w;
-                                Some((flows, w))
+                                Some((name, flows, w))
                             } else if let Some(s) = ov.as_str() {
                                 total_w += 1.0;
-                                Some((vec![s.to_string()], 1.0))
+                                Some((None, vec![s.to_string()], 1.0))
                             } else {
                                 None
                             }
@@ -200,11 +205,11 @@ impl Topology {
                         .collect();
                     // Normalise weights so they sum to 1.0
                     if total_w > 0.0 {
-                        for (_, w) in &mut raw {
+                        for (_, _, w) in &mut raw {
                             *w /= total_w;
                         }
                     }
-                    raw.into_iter().map(|(flows, weight)| OutcomeModel { flows, weight }).collect()
+                    raw.into_iter().map(|(name, flows, weight)| OutcomeModel { name, flows, weight }).collect()
                 }
             };
 
@@ -370,6 +375,16 @@ enum ServiceSource {
     Library,        // operations entry for the gate_template
     WindowFallback, // no library entry: lognormal(p50=0.2·window, p95=0.6·window)
     LegacyUniform,  // no --latencies: uniform[refractory, window]
+    Substituted,    // real implementation: measured service time, actual outcome
+}
+
+fn service_source_str(s: ServiceSource) -> &'static str {
+    match s {
+        ServiceSource::Library        => "library",
+        ServiceSource::WindowFallback => "window-fallback",
+        ServiceSource::LegacyUniform  => "uniform",
+        ServiceSource::Substituted    => "substituted",
+    }
 }
 
 fn service_model(gate: &GateModel, lib: Option<&LatencyLib>) -> (ServiceSource, Option<LogNormal>) {
@@ -399,7 +414,9 @@ fn run_once(
     lib: Option<&LatencyLib>,
     services: &[(ServiceSource, Option<LogNormal>)],
     routes_out: &HashMap<String, Vec<usize>>, // from-node → synapse indices
-) -> HashMap<String, Option<f64>> {
+    subs: &mut Option<substitute::SubPool>,   // co-sim: real gate implementations
+    run_idx: usize,
+) -> Result<HashMap<String, Option<f64>>> {
     // pulse_avail[gate_name][concrete pulse_type] = earliest arrival time
     let mut pulse_avail: HashMap<String, HashMap<String, f64>> = HashMap::new();
 
@@ -503,6 +520,83 @@ fn run_once(
         };
         newly_fired = true;
 
+        // ── Substituted gate: real decision logic replaces both the service
+        //    sample AND the outcome draw ─────────────────────────────────────
+        let substituted = subs.as_ref().map_or(false, |p| p.is_substituted(&gate.name));
+        if substituted {
+            let inputs: Vec<substitute::InputPulse> = avail
+                .as_ref()
+                .map(|a| {
+                    a.iter()
+                        .filter(|(t, &time)| {
+                            time <= join_time
+                                && gate.requires.iter().any(|req| topo.matches(t, req))
+                        })
+                        .map(|(t, &time)| substitute::InputPulse {
+                            pulse_type: t.clone(),
+                            arrival_ms: time,
+                            body: Value::Null, // payload generators fill this (slice step 3)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let resp = subs
+                .as_mut()
+                .unwrap()
+                .call(&gate.name, run_idx, join_time, &inputs)?;
+
+            let fire_time = join_time + resp.service_ms;
+            fire_times.insert(gate.name.clone(), Some(fire_time));
+
+            if !gate.outcomes.is_empty() {
+                let outcome_name = resp.outcome.as_deref().with_context(|| {
+                    format!(
+                        "substituted gate '{}' has declared outcomes but returned none",
+                        gate.name
+                    )
+                })?;
+                let chosen = gate
+                    .outcomes
+                    .iter()
+                    .find(|o| o.name.as_deref() == Some(outcome_name))
+                    .with_context(|| {
+                        format!(
+                            "substituted gate '{}' returned undeclared outcome '{}' (declared: {:?})",
+                            gate.name,
+                            outcome_name,
+                            gate.outcomes.iter().filter_map(|o| o.name.as_deref()).collect::<Vec<_>>()
+                        )
+                    })?;
+                // Contract check: actual outputs ⊆ the chosen outcome's declared flows
+                for out in &resp.outputs {
+                    if !chosen.flows.iter().any(|f| f == &out.pulse_type) {
+                        anyhow::bail!(
+                            "substituted gate '{}' emitted '{}' not declared under outcome '{}' (flows: {:?})",
+                            gate.name, out.pulse_type, outcome_name, chosen.flows
+                        );
+                    }
+                }
+                // Propagate what the real code actually emitted (may be a subset);
+                // if it returned no outputs, fall back to the declared flows.
+                let emitted: Vec<&String> = if resp.outputs.is_empty() {
+                    chosen.flows.iter().collect()
+                } else {
+                    resp.outputs.iter().map(|o| &o.pulse_type).collect()
+                };
+                for pulse_type in emitted {
+                    if let Some(idxs) = routes_out.get(&gate.name) {
+                        for &i in idxs {
+                            if &topo.synapses[i].pulse_type == pulse_type {
+                                deliver(&mut pulse_avail, &topo.synapses[i], fire_time, lib, rng);
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
         let (source, dist) = services[idx];
         let service: f64 = match (source, dist) {
             (ServiceSource::LegacyUniform, _) => {
@@ -546,7 +640,7 @@ fn run_once(
         }
     }
 
-    fire_times
+    Ok(fire_times)
 }
 
 // ── Statistics ─────────────────────────────────────────────────────────────────
@@ -592,11 +686,34 @@ fn main() -> Result<()> {
         None    => StdRng::from_entropy(),
     };
 
+    // Substituted gates (co-simulation): spawn real implementations
+    let mut subs: Option<substitute::SubPool> = match &cfg.substitutions_path {
+        Some(p) => {
+            let pool = substitute::SubPool::from_manifest(p)?;
+            let names = pool.gate_names();
+            for n in &names {
+                if !topo.gates.iter().any(|g| &g.name == n) {
+                    anyhow::bail!("substitution manifest names unknown gate '{}'", n);
+                }
+            }
+            eprintln!("[substitute] {} gate(s) running real implementations: {}",
+                      names.len(), names.join(", "));
+            Some(pool)
+        }
+        None => None,
+    };
+
     // Pre-resolve service models and outgoing-synapse index
     let services: Vec<(ServiceSource, Option<LogNormal>)> = topo
         .gates
         .iter()
-        .map(|g| service_model(g, lib.as_ref()))
+        .map(|g| {
+            if subs.as_ref().map_or(false, |p| p.is_substituted(&g.name)) {
+                (ServiceSource::Substituted, None)
+            } else {
+                service_model(g, lib.as_ref())
+            }
+        })
         .collect();
     let mut routes_out: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, s) in topo.synapses.iter().enumerate() {
@@ -607,8 +724,8 @@ fn main() -> Result<()> {
     let mut gate_times: HashMap<String, Vec<f64>> = HashMap::new();
     let mut gate_miss:  HashMap<String, usize>    = HashMap::new();
 
-    for _ in 0..cfg.runs {
-        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out);
+    for run_idx in 0..cfg.runs {
+        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, run_idx)?;
         for (gate, ft) in result {
             match ft {
                 Some(t) => gate_times.entry(gate).or_default().push(t),
@@ -662,11 +779,7 @@ fn main() -> Result<()> {
     let mut bottleneck_p99  = 0.0f64;
 
     for r in &rows {
-        let svc = match r.service {
-            ServiceSource::Library        => "library",
-            ServiceSource::WindowFallback => "window-fallback",
-            ServiceSource::LegacyUniform  => "uniform",
-        };
+        let svc = service_source_str(r.service);
         println!("{:<42} {:>8.0} {:>8.0} {:>8.0} {:>8.0} {:>6.1}%  {}",
             r.name, r.p50, r.p95, r.p99, r.mean, r.fire_pct, svc);
         if r.fire_pct > 0.0 && r.p99 > bottleneck_p99 {
@@ -712,11 +825,7 @@ fn main() -> Result<()> {
                     "p95_ms": r.p95,
                     "p99_ms": r.p99,
                     "mean_ms": r.mean,
-                    "service_source": match r.service {
-                        ServiceSource::Library        => "library",
-                        ServiceSource::WindowFallback => "window-fallback",
-                        ServiceSource::LegacyUniform  => "uniform",
-                    },
+                    "service_source": service_source_str(r.service),
                 }))
             })
             .collect();
@@ -725,6 +834,7 @@ fn main() -> Result<()> {
             "runs": cfg.runs,
             "seed": cfg.seed,
             "latencies": cfg.latencies_path.as_ref().map(|p| p.display().to_string()),
+            "substituted_gates": subs.as_ref().map(|p| p.gate_names()).unwrap_or_default(),
             "bottleneck": if bottleneck_name.is_empty() { Value::Null }
                           else { json!({"gate": bottleneck_name, "p99_ms": bottleneck_p99}) },
             "dead_gates": dead,
@@ -758,12 +868,13 @@ fn main() -> Result<()> {
 // ── Config ─────────────────────────────────────────────────────────────────────
 
 struct Config {
-    spec_path:      PathBuf,
-    runs:           usize,
-    seed:           Option<u64>,
-    diagnose_dir:   Option<PathBuf>,
-    latencies_path: Option<PathBuf>,
-    report_path:    Option<PathBuf>,
+    spec_path:          PathBuf,
+    runs:               usize,
+    seed:               Option<u64>,
+    diagnose_dir:       Option<PathBuf>,
+    latencies_path:     Option<PathBuf>,
+    report_path:        Option<PathBuf>,
+    substitutions_path: Option<PathBuf>,
 }
 
 impl Config {
@@ -775,20 +886,22 @@ impl Config {
         let mut latencies_path = None;
         let mut report_path    = None;
 
+        let mut substitutions_path = None;
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
-                "--spec"      => { spec_path      = Some(PathBuf::from(&args[i + 1])); i += 2; }
-                "--runs"      => { runs           = args[i + 1].parse().context("--runs must be a positive integer")?; i += 2; }
-                "--seed"      => { seed           = Some(args[i + 1].parse().context("--seed must be an integer")?); i += 2; }
-                "--diagnose"  => { diagnose_dir   = Some(PathBuf::from(&args[i + 1])); i += 2; }
-                "--latencies" => { latencies_path = Some(PathBuf::from(&args[i + 1])); i += 2; }
-                "--report"    => { report_path    = Some(PathBuf::from(&args[i + 1])); i += 2; }
-                other         => anyhow::bail!("unknown argument: {other}"),
+                "--spec"          => { spec_path          = Some(PathBuf::from(&args[i + 1])); i += 2; }
+                "--runs"          => { runs               = args[i + 1].parse().context("--runs must be a positive integer")?; i += 2; }
+                "--seed"          => { seed               = Some(args[i + 1].parse().context("--seed must be an integer")?); i += 2; }
+                "--diagnose"      => { diagnose_dir       = Some(PathBuf::from(&args[i + 1])); i += 2; }
+                "--latencies"     => { latencies_path     = Some(PathBuf::from(&args[i + 1])); i += 2; }
+                "--report"        => { report_path        = Some(PathBuf::from(&args[i + 1])); i += 2; }
+                "--substitutions" => { substitutions_path = Some(PathBuf::from(&args[i + 1])); i += 2; }
+                other             => anyhow::bail!("unknown argument: {other}"),
             }
         }
 
         let spec_path = spec_path.context("--spec <flow.json> is required")?;
-        Ok(Config { spec_path, runs, seed, diagnose_dir, latencies_path, report_path })
+        Ok(Config { spec_path, runs, seed, diagnose_dir, latencies_path, report_path, substitutions_path })
     }
 }
