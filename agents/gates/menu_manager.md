@@ -18,6 +18,8 @@ refractory_ms: 1000
 auth_required: true
 medium: lan
 interaction: push
+status: draft
+confidence: llm-estimate
 ---
 
 ## Menu Manager

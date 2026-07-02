@@ -17,6 +17,8 @@ window_ms: 5000
 refractory_ms: 0
 auth_required: true
 medium: internet
+status: draft
+confidence: llm-estimate
 ---
 
 ## Order Intake

@@ -17,6 +17,8 @@ window_ms: 15000
 refractory_ms: 2000
 auth_required: true
 medium: internet
+status: specified
+confidence: llm-estimate
 ---
 
 ## Payment Processor

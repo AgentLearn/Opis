@@ -48,6 +48,8 @@ The gates repository is a library of computing-level gate templates. Each gate i
 
 The repository starts empty. FA proposes new gates as it encounters slot types that no existing gate covers. Every proposed gate requires User approval before it is added to the repository and before FA can use it in a flow.
 
+**Gate lifecycle and provenance.** A gate entering the repository this way is a *draft*, not an authoritative primitive — FA's mid-run `gate_needed` ADR is a trigger, deliberately weak evidence that is never traced as the contract's justification. Each gate's frontmatter carries a lifecycle `status` (`draft` → `specified` → `simulated` → `measured`) and a `confidence` tag (`llm-estimate` | `twin-validated` | `sourced`). Contracts are promoted only with evidence: grounding in real-life architectures or high-quality sandboxed twin runs. Refinement is iterative — ADR → specs → implementation — and evidence from any stage can demote the stage above it. Building good gate descriptions and the process that refines them is a core, open research thread of Opis.
+
 **Gates are kata-agnostic.** A gate file contains no domain-specific concepts — no mention of the kata, the domain name, or any domain entity. A `payment_processor` gate processes any payment from any domain. Domain meaning lives in the flow spec (archetypes), not in the gate definition. This is what makes gates reusable across katas.
 
 If multiple candidate gates exist for a slot type, FA creates an ADR listing each option for the User to approve before proceeding.
@@ -493,9 +495,9 @@ agents/
     logistics/
       archetypes.md
 
-  output/
-    <kata_name>/
-      flow/
+  output/                         ← regenerated test residue: katas re-run from
+    <kata_name>/                    blank slate; flows are regression baselines,
+      flow/                         ADRs/logs document past runs, no authority
         flow_v1.json              ← first clean passing spec (internal iterations are not versioned)
         flow_v2.json              ← new version only on: kata change, ADR approval, explicit re-run
         flow_current -> flow_v2   ← symlink to latest passing version

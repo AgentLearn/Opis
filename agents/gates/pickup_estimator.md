@@ -16,6 +16,8 @@ refractory_ms: 500
 auth_required: false
 medium: local
 interaction: pull
+status: draft
+confidence: llm-estimate
 ---
 
 ## Pickup Estimator

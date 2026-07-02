@@ -14,6 +14,8 @@ window_ms: 300000
 refractory_ms: 60000
 auth_required: false
 medium: local
+status: draft
+confidence: llm-estimate
 ---
 
 ## Repeat Event Throttle

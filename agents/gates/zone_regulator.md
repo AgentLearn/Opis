@@ -17,6 +17,8 @@ window_ms: 60000
 refractory_ms: 5000
 auth_required: false
 medium: local
+status: draft
+confidence: llm-estimate
 ---
 
 ## Zone Regulator

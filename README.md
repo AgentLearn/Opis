@@ -99,7 +99,7 @@ python -m agents.fa.runner agents/katas/ripple_rides.md
 
 FA iterates against a scratch file and only promotes a real `flow_vN.json` once the flow is simultaneously **eval-clean**, **requirement-proved**, and **gate-conformant** — three independent gates, not the model's own say-so. Supporting machinery:
 
-- **Missing primitives become decisions, not hallucinations.** If a kata needs a gate that doesn't exist, FA doesn't invent one — it writes an **ADR** (architecture decision record) proposing the gate with trade-off options, and stops for human approval. Approved ADRs are turned into reusable, kata-agnostic gate files.
+- **Missing primitives become decisions, not hallucinations.** If a kata needs a gate that doesn't exist, FA doesn't invent one — it writes an **ADR** (architecture decision record) proposing the gate with trade-off options, and stops for human approval. An approved ADR seeds a *draft* gate file — a trigger for the gate-refinement process below, not an authoritative contract. These mid-run ADRs are deliberately weak evidence and are never traced as a contract's justification.
 - **Defect memory across runs.** Every structural defect is fingerprinted and persisted, with fixed / outstanding / reopened counts that survive separate invocations. A defect that keeps recurring nudges FA to propose a *new gate* via ADR rather than rewiring around a need that doesn't fit any existing primitive.
 - **The gate index is derived, not narrated.** Each gate's index row is computed deterministically from its own frontmatter, and a consistency check guarantees the index and the gate files on disk can never drift.
 
@@ -115,6 +115,16 @@ FA iterates against a scratch file and only promotes a real `flow_vN.json` once 
 
 Each was independently re-verified by running the analyzer and prover directly against the committed file, not by trusting the agent's own success report.
 
+Everything under `agents/output/` is **regenerated test residue**: katas re-run from a blank slate, and the committed flows are kept in git only as regression baselines for `regress.py`. The ADRs, logs, and defect histories alongside them document past runs — they are not design artifacts and carry no authority.
+
+---
+
+## The gate library is seed stock — refining it is the research
+
+Every gate contract carries a lifecycle `status` (`draft` → `specified` → `simulated` → `measured`) and a `confidence` provenance tag (`llm-estimate` | `twin-validated` | `sourced`) in its frontmatter. The current 14 contracts were proposed one-shot during early kata runs: they exist to bootstrap the loops, and all of them are tagged `llm-estimate`.
+
+A contract is **promoted only with evidence** — grounding in real-life architectures (published benchmarks, named analogs like payment authorization flows or the circuit-breaker pattern) or high-quality sandboxed twin runs. Promotion is iterative: **ADR → specs → implementation**, where each stage can also *demote* the one above it (a twin run that falsifies a window reopens the spec; a measured implementation that contradicts the simulation reopens the ADR). Building good gate descriptions and building the refinement process that produces them are the same open research question, worked at the same time.
+
 ---
 
 ## Repo layout
@@ -125,7 +135,7 @@ agents/
   gates/             # kata-agnostic gate library + index.md
   slot_types/        # computing-level type definitions
   katas/, input/     # architecture problems
-  output/<kata>/     # committed flows, ADRs, proofs, tests
+  output/<kata>/     # regenerated test residue: regression-baseline flows + run logs
 tools/
   opis-eval/         # eval.py, proof.py, regress.py
 ```
@@ -136,9 +146,9 @@ tools/
 
 This is an active research prototype, not a product — see [the bigger arc](#the-bigger-arc-closing-the-loop-across-three-levels) for the full vision.
 
-- **Built and working:** the pulse-network model, the `opis-eval` / `opis-proof` / `opis-regress` verification stack, the gate library, and **FA** — the flow-level loop, closed end-to-end.
-- **In progress — closing the next loops:** **GA** (gate-level: proves each gate's internal sub-topology honors its declared timing/behavior) and **CA** (code-level: checks a real implementation accepts/emits the right types within bounds), plus the feedback path that lets a lower-level failure invalidate and re-trigger the levels above it. The test scaffolding already names these layers.
-- **Planned:** a Rust Monte-Carlo "twin" to simulate runtime behavior and surface bottlenecks the static analysis flags as intentional (e.g. `sync`-gate consistency boundaries).
+- **Built and working:** the pulse-network model, the `opis-eval` / `opis-proof` / `opis-regress` verification stack, the Rust Monte-Carlo **twin** (`da-twin` + `twin_check`: subtype- and logic-aware simulation, latency library, advisory timing norms), and **FA** — the flow-level loop, closed end-to-end.
+- **Seed stock, being refined:** the gate library — 14 draft contracts tagged `llm-estimate`, awaiting promotion through the ADR → specs → implementation cycle (see above).
+- **In progress — closing the next loops:** **GA** (gate-level: proves each gate's internal sub-topology honors its declared timing/behavior; contract verifier and golden internals exist, the agent loop and twin-driven timing tuner do not yet) and **CA** (code-level: checks a real implementation accepts/emits the right types within bounds), plus the feedback path that lets a lower-level failure invalidate and re-trigger the levels above it. The test scaffolding already names these layers.
 - **The outer loop:** real-use feedback — a path from observed usage back into the system that can regenerate the architecture or rewrite the kata. This is what closes *usefulness*, and it's the loop no static check can substitute for.
 - **The real milestone:** applying the closed loop to a system that actually gets used, not just katas.
 
@@ -147,4 +157,5 @@ This is an active research prototype, not a product — see [the bigger arc](#th
 - Structural claims are verified, never described. "All requirements covered" is worthless without a reconstructed path.
 - Gates are reusable computing primitives; domain knowledge lives only in the type taxonomy.
 - Missing capability is a design decision (an ADR), not something the agent papers over.
+- Provenance is never silent: every timing number and contract is tagged with how it was obtained (`llm-estimate` | `twin-validated` | `sourced`), and estimates are never mixed with evidence.
 - The tools are stateless and file-based on purpose — the artifacts *are* the proof.

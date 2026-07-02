@@ -20,6 +20,8 @@ window_ms: 5000
 refractory_ms: 1000
 auth_required: true
 medium: local
+status: draft
+confidence: llm-estimate
 ---
 
 ## Loyalty Processor

@@ -18,6 +18,8 @@ refractory_ms: 1000
 auth_required: true
 medium: local
 interaction: push
+status: draft
+confidence: llm-estimate
 ---
 
 ## Completion Finalizer

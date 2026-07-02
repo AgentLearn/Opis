@@ -23,6 +23,8 @@ refractory_ms: 5000
 auth_required: true
 medium: internet
 interaction: push
+status: draft
+confidence: llm-estimate
 ---
 
 ## Driver Dispatcher

@@ -17,6 +17,8 @@ window_ms: 5000
 refractory_ms: 500
 auth_required: true
 medium: lan
+status: draft
+confidence: llm-estimate
 ---
 
 ## Producer Submitter

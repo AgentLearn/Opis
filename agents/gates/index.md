@@ -1,6 +1,16 @@
 # Gates Index
 
-Computing-level gate library. FA selects gates by matching domain archetaries to input slot types.
+Computing-level gate library. FA selects gates by matching domain archetypes to input slot types.
+
+Every gate carries a lifecycle `status` and a `confidence` provenance tag in its
+frontmatter. The current library is **seed stock**: contracts were proposed
+one-shot during early kata runs and are unvalidated drafts, not authoritative
+primitives. A contract is promoted only with evidence — grounding in real-life
+architectures (`sourced`) or high-quality sandboxed twin runs (`twin-validated`).
+
+Lifecycle: `draft` (ADR only) → `specified` (contract + proved internals) →
+`simulated` (twin-validated timing) → `measured` (real CA implementation PDs).
+Demotion is possible: evidence from any lower stage can invalidate the stage above.
 
 | gate | kind | input slot types | output slot types | auth_required |
 |------|------|-------------------|-------------------|---------------|

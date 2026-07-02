@@ -16,6 +16,8 @@ refractory_ms: 0
 auth_required: false
 medium: local
 interaction: push
+status: draft
+confidence: llm-estimate
 ---
 
 ## Event Recorder

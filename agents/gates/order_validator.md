@@ -23,6 +23,8 @@ window_ms: 8000
 refractory_ms: 500
 auth_required: true
 medium: lan
+status: draft
+confidence: llm-estimate
 ---
 
 ## Order Validator

@@ -16,6 +16,8 @@ refractory_ms: 500
 auth_required: false
 medium: internet
 interaction: pull
+status: draft
+confidence: llm-estimate
 ---
 
 ## Delivery Router
