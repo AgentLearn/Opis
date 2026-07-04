@@ -1,0 +1,62 @@
+{
+  "@context": {
+    "opis": "https://opis.local/sa#",
+    "groundedIn": "opis:groundedIn",
+    "sourceOntology": "opis:sourceOntology",
+    "onAxis": {"@id": "opis:onAxis", "@type": "@id"},
+    "opisValue": "opis:opisValue",
+    "realizedBy": "opis:realizedBy",
+    "grounding": "opis:grounding",
+    "mappingStrength": "opis:mappingStrength",
+    "note": "opis:note"
+  },
+  "_meta": {
+    "title": "Opis SA taxonomy v1 (assembled from published ontologies)",
+    "purpose": "Phase-1 deliverable: the literature-grounded TARGET that business domain terms map onto. Axes: term (domain-facing, slot_types), logic (join/branch), template-movement (EIP), template-computation (Dataflow+DDD), kind (resilience). See ontology/corpus/*.md for sources and induced_ontology_v1.json for the full 43-pattern logic-axis induction.",
+    "domain_to_SA_mapping": "A kata's business behaviour resolves to a tuple: (1) a TERM (its data, via slot_types extends), (2) a TEMPLATE — either a MOVEMENT template (EIP: route/filter/aggregate/split/enrich/observe) or a COMPUTATION template (Dataflow ParDo/Combine/window + DDD Aggregate/Domain-Service for compute & state), (3) a LOGIC (how it joins inputs), (4) a KIND (stability role). Phase-1 goal is to exercise this mapping across many katas.",
+    "axes": ["term", "logic", "template_movement", "template_computation", "kind"]
+  },
+  "@graph": [
+    {"@id": "opis:axis_term", "@type": "TaxonomyAxis", "name": "term", "sourceOntology": "Opis slot_types (domain-facing); OWL-S IOPE / FIBO / FRO for grounding if needed", "note": "the business-domain-facing axis: what data flows. Business terms map here via `extends`. Not re-derived in this run."},
+    {"@id": "opis:axis_logic", "@type": "TaxonomyAxis", "name": "logic", "sourceOntology": "van der Aalst / Russell Workflow Control-Flow Patterns (43 patterns)", "note": "how a gate joins/branches its inputs. Full induction in induced_ontology_v1.json."},
+    {"@id": "opis:axis_template", "@type": "TaxonomyAxis", "name": "template_movement", "sourceOntology": "Hohpe & Woolf Enterprise Integration Patterns (65 patterns)", "note": "MOVEMENT templates: how a gate routes/filters/aggregates/splits/enriches/observes messages."},
+    {"@id": "opis:axis_computation", "@type": "TaxonomyAxis", "name": "template_computation", "sourceOntology": "Akidau et al. Dataflow Model (PVLDB 2015) + Evans DDD tactical patterns", "note": "COMPUTATION templates: what NEW VALUE a gate computes / what STATE it owns. Added 2026-07-04 after silicon mapping found EIP has no home for compute/accumulate gates."},
+    {"@id": "opis:axis_kind", "@type": "TaxonomyAxis", "name": "kind", "sourceOntology": "Nygard Release It! + Azure Cloud Design Patterns (resilience)", "note": "a gate's stability role: how it protects the flow."},
+
+    {"@id": "opis:logic_AND", "@type": "GateLogic", "onAxis": "opis:axis_logic", "opisValue": "AND", "groundedIn": "WCP3 Synchronization / WCP33 Generalised AND-Join", "grounding": "exact", "realizedBy": "EIP Aggregator (completeness = all)"},
+    {"@id": "opis:logic_OR", "@type": "GateLogic", "onAxis": "opis:axis_logic", "opisValue": "OR", "groundedIn": "WCP5 Simple Merge (XOR-join)", "grounding": "exact"},
+    {"@id": "opis:logic_FIRST", "@type": "GateLogic", "onAxis": "opis:axis_logic", "opisValue": "FIRST", "groundedIn": "WCP9 Structured Discriminator", "grounding": "exact", "note": "FIRST = THRESHOLD(n=1); Discriminator = 1-of-m Partial Join"},
+    {"@id": "opis:logic_THRESHOLD", "@type": "GateLogic", "onAxis": "opis:axis_logic", "opisValue": "THRESHOLD", "groundedIn": "WCP30 Structured Partial Join (N-of-M)", "grounding": "exact", "realizedBy": "EIP Aggregator (completeness = n) / Scatter-Gather"},
+
+    {"@id": "opis:tmpl_router", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "content-based router", "groundedIn": "EIP Content-Based Router", "grounding": "exact", "realizedBy": "delivery_router / routed_command_dispatcher"},
+    {"@id": "opis:tmpl_recipient_list", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "fan-out router", "groundedIn": "EIP Recipient List", "grounding": "exact"},
+    {"@id": "opis:tmpl_aggregator", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "join / aggregator", "groundedIn": "EIP Aggregator", "grounding": "exact", "realizedBy": "routing_decision_aggregator", "note": "the TEMPLATE form of AND/THRESHOLD logic: completeness condition + correlation. Unifies logic and template axes."},
+    {"@id": "opis:tmpl_scatter_gather", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "scatter-gather", "groundedIn": "EIP Scatter-Gather", "grounding": "exact", "realizedBy": "routing_decision_multi_provider_aggregator"},
+    {"@id": "opis:tmpl_enricher", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "content enricher", "groundedIn": "EIP Content Enricher", "grounding": "exact", "realizedBy": "provider_query_resolver"},
+    {"@id": "opis:tmpl_filter", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "content filter / projection", "groundedIn": "EIP Content Filter", "grounding": "exact", "realizedBy": "order_validator (accepted_order projection)"},
+    {"@id": "opis:tmpl_msg_filter", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "guard / message filter", "groundedIn": "EIP Message Filter", "grounding": "partial", "note": "Opis discourages silent drops (ADR-011 rejected sink gate); guard emits reject rather than discard"},
+    {"@id": "opis:tmpl_splitter", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "splitter / fan-out emitter", "groundedIn": "EIP Splitter", "grounding": "exact"},
+    {"@id": "opis:tmpl_wiretap", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": "wire tap / observer", "groundedIn": "EIP Wire Tap", "grounding": "exact", "realizedBy": "event_recorder"},
+    {"@id": "opis:tmpl_dynamic_router", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": null, "groundedIn": "EIP Dynamic Router", "grounding": "none", "note": "runtime-mutable routing; no Opis template (routing static in a flow). GAP."},
+    {"@id": "opis:tmpl_resequencer", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": null, "groundedIn": "EIP Resequencer", "grounding": "none", "note": "ordering guarantee; likely CA/body layer. GAP."},
+    {"@id": "opis:tmpl_durable_sub", "@type": "GateTemplate", "onAxis": "opis:axis_template", "opisValue": null, "groundedIn": "EIP Durable Subscriber", "grounding": "none", "note": "buffered/retained input; same buffering gap as WCP24 Persistent Trigger. GAP."},
+
+    {"@id": "opis:comp_map", "@type": "GateComputeTemplate", "onAxis": "opis:axis_computation", "opisValue": "compute / transform", "groundedIn": "Dataflow ParDo/Map (element-wise) + DDD Domain Service (cross-term)", "grounding": "exact", "realizedBy": "queue_based_estimator (queue,location→estimate); implicit pricing", "note": "resolves silicon friction C: a gate that computes a NEW value from inputs, stateless."},
+    {"@id": "opis:comp_reduce", "@type": "GateComputeTemplate", "onAxis": "opis:axis_computation", "opisValue": "stateful reducer", "groundedIn": "Dataflow Combine/Reduce (computation) + DDD Aggregate (state ownership)", "grounding": "exact", "realizedBy": "reward_accumulator (fold loyalty events→points, per-customer)", "note": "resolves silicon friction D: TWO patterns — Combine (what it folds) + Aggregate (which entity owns the state). A stateful gate declares both."},
+    {"@id": "opis:comp_window", "@type": "GateComputeTemplate", "onAxis": "opis:axis_computation", "opisValue": "windowed aggregate", "groundedIn": "Dataflow Windowing (fixed/sliding/session)", "grounding": "exact", "realizedBy": null, "note": "reduce scoped to a time window; SECOND independent grounding of Opis windows (input_timeout_ms) on the compute side — resilience Timeout grounds them on the protection side."},
+    {"@id": "opis:comp_domain_service", "@type": "GateComputeTemplate", "onAxis": "opis:axis_computation", "opisValue": "domain service", "groundedIn": "DDD Domain Service", "grounding": "exact", "realizedBy": "routing computation spanning terms", "note": "computation whose output is not owned by any single input term; grounds cross-term compute gates that ParDo alone under-describes."},
+    {"@id": "opis:term_value_object", "@type": "TermKind", "onAxis": "opis:axis_term", "opisValue": "value object (computed term)", "groundedIn": "DDD Value Object", "grounding": "exact", "note": "computed, immutable, identity-less output terms: estimate, price, routing_decision. Distinct from entity terms."},
+    {"@id": "opis:term_entity", "@type": "TermKind", "onAxis": "opis:axis_term", "opisValue": "entity (identity term)", "groundedIn": "DDD Entity", "grounding": "exact", "note": "identity-bearing terms (order, customer, driver); the natural aggregate roots for stateful gates."},
+
+    {"@id": "opis:kind_breaker", "@type": "GateKind", "onAxis": "opis:axis_kind", "opisValue": "breaker", "groundedIn": "Circuit Breaker (Nygard / Azure)", "grounding": "exact", "note": "trips_on = failure threshold; recovery_ms = timeout to half-open. Source definition."},
+    {"@id": "opis:kind_sentinel", "@type": "GateKind", "onAxis": "opis:axis_kind", "opisValue": "sentinel", "groundedIn": "Gatekeeper (Azure)", "grounding": "exact", "note": "brokering/validation guard in front of a protected gate. Source definition. auth_token realizes it."},
+    {"@id": "opis:kind_regulator", "@type": "GateKind", "onAxis": "opis:axis_kind", "opisValue": "regulator", "groundedIn": "Throttling / Governor / Rate Limiting (Nygard / Azure)", "grounding": "exact", "realizedBy": "zone_regulator / repeat_event_throttle"},
+    {"@id": "opis:kind_regulator_bulkhead", "@type": "GateKind", "onAxis": "opis:axis_kind", "opisValue": null, "groundedIn": "Bulkhead (Nygard / Azure)", "grounding": "partial", "note": "per-compartment resource isolation; candidate refinement of regulator. Only kind-axis concept without a clean Opis primitive."},
+    {"@id": "opis:kind_plain", "@type": "GateKind", "onAxis": "opis:axis_kind", "opisValue": "plain", "groundedIn": "Fail Fast (Nygard) for the guard/validation case", "grounding": "partial"},
+
+    {"@id": "opis:timing_window", "@type": "TimingField", "opisValue": "input_timeout_ms", "groundedIn": "Timeout (Nygard); NOT in workflow-patterns (untimed) or EIP", "grounding": "exact", "note": "IMPORTANT nuance: windows are Opis-original to WORKFLOW modeling (that literature is untimed) but STANDARD in resilience engineering (Timeout pattern). State precisely, do not overclaim novelty."},
+    {"@id": "opis:timing_refractory", "@type": "TimingField", "opisValue": "recovery_ms", "groundedIn": "Circuit Breaker recovery timeout; Governor (rate limit); rider-cooldown", "grounding": "partial", "note": "timed refractory after firing. Grounded in resilience, absent from workflow/EIP."},
+    {"@id": "opis:prob_outcome", "@type": "OpisOriginal", "opisValue": "probabilistic outcome", "groundedIn": null, "grounding": "none", "note": "outcomes carry probabilities for twin sampling. No counterpart in ANY of the three source ontologies. Genuine Opis contribution (measurement/twin layer)."},
+    {"@id": "opis:latency_budget", "@type": "OpisOriginal", "opisValue": "p50/p95 latency budget", "groundedIn": "Timeout (partial — Timeout bounds waits but is not a distributional budget)", "grounding": "partial", "note": "distributional timing contract on a gate; twin-measured. Closest is Timeout but that is a hard bound, not a p50/p95 distribution."}
+  ]
+}
