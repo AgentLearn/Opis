@@ -114,6 +114,8 @@ FA iterates, producing a new versioned flow spec (`flow_vN.json`) each pass, unt
 
 ### GA — Gate Architect
 
+> **Status (2026-07-04): GA as a standing agent loop is retired.** Contract judgment moved to the User: evidence reports (see *Versioning, User Gates, and Evidence*) are the facts, the ADR channel is the control surface, and lifecycle promotion is a user decision. The twin/PD machinery remains as tooling. The description below is kept as the historical contract-loop framing.
+
 GA is the contract loop — the loop that tightens the Opis description itself. GA solely owns the gate library: every contract has exactly one owner. GA takes each gate selected by FA, designs and verifies its internals, and runs Monte Carlo simulations (the twin) to produce probability distributions (PDs) for gate behavior — latency, throughput, failure rates. GA promotes or demotes each contract's lifecycle `status` as evidence accumulates. When CA has produced sandbox measurements, GA weighs those measured PDs against the simulated ones.
 
 GA iterates until all gates are fully parameterized and their PDs are within the bounds required by the flow. GA proposes tests for its own output and for CA runs.
@@ -154,6 +156,53 @@ GA drives; CA is engaged per flow and reports back. Evidence that falsifies a co
 When any agent cannot resolve a problem: it notifies the agent above with a structured description of what is missing. When any agent faces a decision: it creates an ADR with proposals and waits for User approval before continuing.
 
 **Trigger:** command line for now; the UI (designed in Opis — dogfood) when ready.
+
+## Versioning, User Gates, and Evidence (design, 2026-07-04)
+
+### One official source of truth
+
+The official gate library, slot types, SA taxonomy, and the derived graph all live in the Opis repo. The graph DB is a deterministic build artifact of git content — users consume it read-only and never write to it.
+
+### Flow pins
+
+A flow version is reproducible. `flow_vN.json` carries a lock block pinning every gate contract (`template → {version, hash}`) and the taxonomy version it was typed against. Verifier versions are a separate problem and may join the pin later.
+
+Official contracts are append-only: an amendment is `contract_v(N+1)`; any version ever pinned by a committed flow is immutable, and the hash catches in-place edits. A new official version never moves a pinned flow — upgrade is a manual re-prove producing a new flow version with fresh pins. Old flows stay green forever against their pinned world.
+
+### User gates — jewels
+
+Users add gates in their workspace repo (`workspace/gates/`), namespaced (`user.x`), never shadowing an official name, validated by the identical verifier stack. User gates may subtype official templates. User terms follow the same rule: extend official slot types, never edit them.
+
+Ranking is jewels-first: user gates outrank official ones in retrieval and proposal, across all katas. Overrides exist at three levels — a per-run switch (official-only retrieval), a per-decision choice in the ADR loop, and the soft one: a jewel that fails conformance or proof falls back to official candidates without asking. Jewels get priority in proposal, never exemption from proof.
+
+Promotion of a jewel into the official library is an evidence-backed PR carrying its evidence pointers; status/confidence tags travel with it.
+
+### Two ADR classes
+
+FA-proposed ADRs keep the full format: genuine options, architect decides. User directive ADRs are one line, binding on arrival, no options required — "use my gate" is a complete valid ADR. Both follow the same commit lifecycle and inject as binding context; a directive triggers the re-prove that changes the flow. The pin block records *what* won; the directive records *why*.
+
+### Retrieval loop (GraphRAG)
+
+Kata/DSL terms are typed against the SA taxonomy; the graph query returns only gates involving those types; FA tries them. When proof reports an unreachable required type, that missing term expands the query — demand-driven and iterative, not one-shot. Terms pulled in mid-loop must pass stage-1 typing before their gates are queried. Retrieval exhausted with a requirement still unproved is the ADR trigger, carrying structured evidence: no gate in official or user space consumes/produces the missing type.
+
+User jewels superpose on the official graph as a local, origin-tagged overlay, regenerated per run, never committed to the official graph. Precedent (prior use in the user's committed flows) drives ranking; retrieval proposes the latest contract version but surfaces when precedent was pinned to an older one.
+
+### Evidence report
+
+One JSON report per flow version, in workspace, append-only, referenced by the flow; a rendered summary is derived for the user. It is the only artifact that persists from a CA run. Four layers:
+
+1. **Provenance** — kata, flow version, full pin block, seed, run counts, execution environment.
+2. **Static proofs** — eval checks, each requirement with its witness path, conformance.
+3. **Dynamic evidence** — twin per-gate fire%/p50/p95/p99 and norm flags; co-sim substitution ladder, outcome deltas vs baseline, measured lower bounds.
+4. **Per-gate evidence slices** — keyed `template@version`, stable schema: what this run demonstrated about each contract.
+
+Claim grammar: every statement is `{claim, verdict, evidence-pointer, scope}` with verdicts `proved | passed | bounded | flagged | failed` and scopes `static | twin | cosim | sourced`. No assertion without a pointer. Sandbox passes are always `bounded` — lower bounds only; `failed` is conclusive (falsify confidently, validate weakly, enforced by the format). The user verdict block at the top is generated from the `bounded`/`flagged` tuples, never hand-written.
+
+Evidence has one judge: the User. Lifecycle promotion (`draft → specified → simulated → measured`) is a user decision through the ADR channel with evidence pointers attached. Evidence slices load into the workspace-side graph overlay, so cross-run questions ("what has `payment_processor` demonstrated across my flows?") are graph queries.
+
+### The user touches three artifacts
+
+The kata (writes), ADRs (decides), evidence reports (reads). Everything else belongs to agents. Unmappable domain terms surface through the same decision channel as ADRs — a user decision, never an agent guess. Token cost is visible at the decision point: a directive is the cheap path, an FA deliberation round the expensive one.
 
 ## UI
 

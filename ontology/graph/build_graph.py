@@ -18,18 +18,27 @@ DATA on each concept, so step-1 retrieval is a Cypher query, not Python string c
 
 Run:  python build_graph.py        # (re)builds ./opis_kuzu
 """
-import json, os, shutil, kuzu
+import glob, json, os, shutil, kuzu
 from pathlib import Path
+
+def _rm(p):
+    """remove a Kùzu db whether it's a file or dir, plus its .wal/.shadow siblings."""
+    for path in [str(p)] + glob.glob(str(p) + "*"):
+        pp = Path(path)
+        if pp.is_dir(): shutil.rmtree(pp, ignore_errors=True)
+        elif pp.exists(): pp.unlink()
 
 HERE = Path(__file__).resolve().parent
 TAXO = HERE.parent / "sa_taxonomy_v1.json"
+MAPS = HERE.parent / "mappings.jsonl"   # precedent corpus (11 katas) from extract_mappings.py
 # Kùzu needs a writable FS (WAL/shadow files). Default in-place for local use;
 # override with OPIS_KUZU_DIR when the working dir is read-only (e.g. sandbox mount).
 DBDIR = Path(os.environ.get("OPIS_KUZU_DIR", HERE / "opis_kuzu"))
 
 # lexical trigger stems per role (knowledge stored AS DATA on concepts).
 ROLE_TRIGGERS = {
-    "logic:AND": ["all","both","combin","coordinat","aggregat","consolidat"],
+    "logic:AND": ["all of","all its","all the","all required","all incoming","every",
+                  "both","combin","aggregat","consolidat"],
     "logic:OR": ["either","any"],
     "logic:FIRST": ["first","accept","within a"],
     "logic:THRESHOLD": ["sufficient","majority","enough","several","quorum","fraction"],
@@ -65,7 +74,7 @@ def role_of(node):
     return None
 
 def main():
-    if DBDIR.exists(): shutil.rmtree(DBDIR)
+    _rm(DBDIR)
     doc = json.loads(TAXO.read_text())
     db = kuzu.Database(str(DBDIR)); conn = kuzu.Connection(db)
 
@@ -73,15 +82,20 @@ def main():
                  "axis STRING, semantics STRING, grounding STRING, triggers STRING[], "
                  "PRIMARY KEY(id))")
     conn.execute("CREATE NODE TABLE Gate(name STRING, PRIMARY KEY(name))")
+    conn.execute("CREATE NODE TABLE Behaviour(id STRING, kata STRING, text STRING, PRIMARY KEY(id))")
     conn.execute("CREATE REL TABLE ON_AXIS(FROM Concept TO Concept)")
     conn.execute("CREATE REL TABLE REALIZED_BY(FROM Concept TO Gate)")
+    conn.execute("CREATE REL TABLE USES(FROM Behaviour TO Concept)")        # precedent: behaviour used this axis-value
+    conn.execute("CREATE REL TABLE REALIZES_GATE(FROM Behaviour TO Gate)")  # precedent: behaviour realized by this gate
 
     axis_ids = {n["@id"] for n in doc["@graph"] if n["@type"] == "TaxonomyAxis"}
     gates = set()
     # nodes
     for n in doc["@graph"]:
         role = role_of(n)
-        trig = ROLE_TRIGGERS.get(role, [])
+        # store triggers with a leading space so `" "+text CONTAINS " stem"` matches
+        # at word starts only (stem-prefix), not mid-word ("all" ≠ "dynamically").
+        trig = [" " + t for t in ROLE_TRIGGERS.get(role, [])]
         conn.execute(
             "CREATE (:Concept {id:$id, label:$label, ntype:$ntype, axis:$axis, "
             "semantics:$sem, grounding:$gr, triggers:$trig})",
@@ -105,10 +119,35 @@ def main():
             conn.execute("MATCH (c:Concept {id:$a}),(g:Gate {name:$b}) "
                          "CREATE (c)-[:REALIZED_BY]->(g)", {"a":n["@id"],"b":n["realizedBy"]})
 
-    n_c = conn.execute("MATCH (c:Concept) RETURN count(*)").get_next()[0]
-    n_g = conn.execute("MATCH (g:Gate) RETURN count(*)").get_next()[0]
-    n_r = conn.execute("MATCH ()-[r:REALIZED_BY]->() RETURN count(*)").get_next()[0]
-    print(f"built {DBDIR.name}: {n_c} concepts, {n_g} gates, {n_r} realized-by edges")
+    # ── precedent corpus: load the 11 katas' mapped behaviours ────────────────
+    # tag (e.g. "tmpl:router") -> concept ids, via the same role_of mapping
+    tag_ids = {}
+    for n in doc["@graph"]:
+        r = role_of(n)
+        if r: tag_ids.setdefault(r, []).append(n["@id"])
+    if MAPS.exists():
+        for i, line in enumerate(MAPS.read_text().splitlines()):
+            if not line.strip(): continue
+            r = json.loads(line); bid = f"{r['kata']}#{r['n']}"
+            conn.execute("CREATE (:Behaviour {id:$id, kata:$k, text:$t})",
+                         {"id": bid, "k": r["kata"], "t": r["behaviour"][:200]})
+            for tok in r.get("tokens", []):
+                for cid in tag_ids.get(tok, []):
+                    conn.execute("MATCH (b:Behaviour {id:$b}),(c:Concept {id:$c}) "
+                                 "CREATE (b)-[:USES]->(c)", {"b": bid, "c": cid})
+            g = (r.get("gate") or "").strip()
+            # keep only clean gate names (skip "(none …)" / prose)
+            if g and not g.startswith("(") and len(g) < 60:
+                conn.execute("MERGE (g:Gate {name:$n})", {"n": g})
+                conn.execute("MATCH (b:Behaviour {id:$b}),(g:Gate {name:$n}) "
+                             "CREATE (b)-[:REALIZES_GATE]->(g)", {"b": bid, "n": g})
+
+    def cnt(q): return conn.execute(q).get_next()[0]
+    print(f"built {DBDIR.name}: {cnt('MATCH (c:Concept) RETURN count(*)')} concepts, "
+          f"{cnt('MATCH (g:Gate) RETURN count(*)')} gates, "
+          f"{cnt('MATCH (b:Behaviour) RETURN count(*)')} behaviours, "
+          f"{cnt('MATCH ()-[r:USES]->() RETURN count(*)')} uses-edges, "
+          f"{cnt('MATCH ()-[r:REALIZES_GATE]->() RETURN count(*)')} precedent-gate edges")
 
 if __name__ == "__main__":
     main()

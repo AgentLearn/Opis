@@ -10,17 +10,21 @@ The data source is `../sa_taxonomy_v1.json` (JSON-LD), so the graph is portable 
 any Cypher/GQL store.
 
 ## Files
-- `build_graph.py` — loads `sa_taxonomy_v1.json` into `./opis_kuzu` (Concept + Gate
-  nodes, ON_AXIS + REALIZED_BY edges). Lexical trigger stems are stored AS DATA on
-  each concept (`triggers` property) so retrieval is a query, not code.
-- `step1.py` — step-1 retrieval: one Cypher query per kata behaviour → the relevant
-  SA-taxonomy subset (logic / template_movement / template_computation / kind) +
-  candidate gates via REALIZED_BY.
+- `extract_mappings.py` — parses the 11 kata mapping tables (`../mapping_*.md`, 3 layouts)
+  into `../mappings.jsonl`: the precedent corpus (101 behaviours → term/logic/template/
+  kind/gate + normalized axis tokens). Run this before build_graph.py.
+- `build_graph.py` — loads `sa_taxonomy_v1.json` + `mappings.jsonl` into `./opis_kuzu`:
+  Concept + Gate + Behaviour nodes; ON_AXIS, REALIZED_BY, USES (behaviour→concept),
+  REALIZES_GATE (behaviour→gate) edges. Lexical trigger stems are stored AS DATA on each
+  concept (`triggers`), space-prefixed for word-start matching, so retrieval is a query.
+- `step1.py` — step-1 retrieval per kata behaviour: (1) SA-taxonomy subset via triggers,
+  (2) candidate gates RANKED BY PRECEDENT frequency, (3) nearest precedent behaviours.
 
 ## Run
 ```
 pip install kuzu --break-system-packages
 cd ontology/graph
+python extract_mappings.py                  # ../mappings.jsonl (precedent corpus)
 python build_graph.py                       # builds ./opis_kuzu
 python step1.py                             # silicon by default
 python step1.py ../../agents/katas/aegiswatch_threat_detection.md

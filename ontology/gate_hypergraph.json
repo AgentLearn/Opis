@@ -1,0 +1,144 @@
+{
+  "terms": {
+    "order": null,
+    "accepted_order": "order",
+    "rejected_order": "order",
+    "payment": null,
+    "payment_confirmed": "payment",
+    "payment_failed": "payment",
+    "auth_request": null,
+    "auth_token": null,
+    "notification": null,
+    "query": null,
+    "query_response": null,
+    "event": null,
+    "command": null,
+    "ack": null,
+    "routing_decision": null,
+    "location": null,
+    "estimate": null,
+    "inventory_update": null,
+    "reward": null,
+    "menu_update": null,
+    "tracking_update": null
+  },
+  "gates": [
+    {
+      "gate": "auth_token",
+      "kind": "sentinel",
+      "consumes": [
+        "auth_request",
+        "query_response"
+      ],
+      "emits": [
+        "query",
+        "auth_token",
+        "event"
+      ],
+      "auth_required": false
+    },
+    {
+      "gate": "payment_authorizer",
+      "kind": "regulator",
+      "consumes": [
+        "payment",
+        "reward"
+      ],
+      "emits": [
+        "payment_confirmed",
+        "payment_failed"
+      ],
+      "auth_required": false
+    },
+    {
+      "gate": "queue_based_estimator",
+      "kind": "gate",
+      "consumes": [
+        "query",
+        "location"
+      ],
+      "emits": [
+        "estimate"
+      ],
+      "auth_required": false
+    },
+    {
+      "gate": "routing_decision_aggregator",
+      "kind": "gate",
+      "consumes": [
+        "query",
+        "query_response"
+      ],
+      "emits": [
+        "query",
+        "routing_decision"
+      ],
+      "auth_required": false
+    },
+    {
+      "gate": "routed_command_dispatcher",
+      "kind": "gate",
+      "consumes": [
+        "accepted_order",
+        "routing_decision",
+        "location"
+      ],
+      "emits": [
+        "command",
+        "notification"
+      ],
+      "auth_required": false
+    },
+    {
+      "gate": "assignment_tracker",
+      "kind": "gate",
+      "consumes": [
+        "command"
+      ],
+      "emits": [
+        "tracking_update",
+        "notification"
+      ],
+      "auth_required": false
+    },
+    {
+      "gate": "scoped_catalogue_writer",
+      "kind": "gate",
+      "consumes": [
+        "menu_update",
+        "auth_token",
+        "query_response"
+      ],
+      "emits": [
+        "event",
+        "notification",
+        "query"
+      ],
+      "auth_required": true
+    },
+    {
+      "gate": "reward_accumulator",
+      "kind": "gate",
+      "consumes": [
+        "event",
+        "query"
+      ],
+      "emits": [
+        "reward"
+      ],
+      "auth_required": false
+    },
+    {
+      "gate": "order_validator",
+      "kind": "gate",
+      "consumes": [
+        "order"
+      ],
+      "emits": [
+        "accepted_order",
+        "rejected_order"
+      ],
+      "auth_required": false
+    }
+  ]
+}
