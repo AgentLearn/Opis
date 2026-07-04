@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from .prompts import SYSTEM_PROMPT, GATE_GENERATION_PROMPT, GATE_AMENDMENT_PROMPT, build_user_prompt
+from .prompts import (SYSTEM_PROMPT, GATE_GENERATION_PROMPT, GATE_AMENDMENT_PROMPT,
+                      TAXONOMY_PROMPT, build_user_prompt)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "agents"
@@ -21,7 +22,8 @@ AGENT_DIR = AGENTS_DIR
 TOOLS_DIR = REPO_ROOT / "tools"
 
 MAX_ITERATIONS = 5
-MODEL = "claude-opus-4-8"
+MODEL = "claude-fable-5"        # flow design: the hard reasoning
+GATE_MODEL = "claude-sonnet-5"  # ADR → gate .md: mechanical transcription, cheaper
 
 # Once the same defect fingerprint has been observed this many times (across
 # iterations AND prior runs, via persisted defect history) without being
@@ -130,16 +132,177 @@ class FAAgent:
         text = "\n\n".join(chunks)
         return text[:max_chars]
 
+    @staticmethod
+    def _response_text(response) -> str:
+        """Concatenate the TEXT blocks of a response. Fable-class models
+        prepend ThinkingBlocks; content[0].text blows up on those."""
+        return "".join(
+            b.text for b in response.content if getattr(b, "type", "") == "text")
+
+    _model_verified = False
+
+    def _verify_served_model(self, response) -> None:
+        """The API once silently served a fallback for an invalid model string.
+        Never again: verify the served model matches the pin, loudly, once."""
+        if FAAgent._model_verified:
+            return
+        served = getattr(response, "model", "")
+        if not served.startswith(MODEL):
+            print(f"  !! MODEL MISMATCH: pinned '{MODEL}' but API served '{served}' — "
+                  f"check the model string / account access")
+        else:
+            print(f"  model verified: {served}")
+        FAAgent._model_verified = True
+
+    # ── Stage 1: domain taxonomy (kata terms → slot types → gates) ──────────
+
+    def _taxonomy_path(self) -> Path:
+        return self.output_dir / f"taxonomy_v{self.version}.json"
+
+    @staticmethod
+    def _parse_index_gates(gates_index: str) -> list[tuple[str, str, list[str], list[str]]]:
+        """(name, kind, in_types, out_types) rows from the gates index table."""
+        rows = []
+        for line in gates_index.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) == 5 and cells[0] not in ("gate", "") and not set(cells[0]) <= set("-"):
+                rows.append((cells[0], cells[1],
+                             [t.strip() for t in cells[2].split(",") if t.strip()],
+                             [t.strip() for t in cells[3].split(",") if t.strip()]))
+        return rows
+
+    @staticmethod
+    def _slot_type_parents(slot_types: str) -> dict[str, str | None]:
+        """{slot_type: parent_or_None} from the slot_types index table."""
+        out: dict[str, str | None] = {}
+        for line in slot_types.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 2 and cells[0] not in ("type", "") and not set(cells[0]) <= set("-"):
+                parent = cells[1] if cells[1] not in ("—", "-", "") else None
+                out[cells[0]] = parent
+        return out
+
+    def _load_or_create_taxonomy(self, kata: str, slot_types: str, gates_index: str) -> dict | None:
+        """Stage 1 of a run: the domain glossary. Generated once per version,
+        persisted, mechanically validated and enriched with gate linkage —
+        then BINDING for every flow iteration. Returns None if unmappable
+        concepts need a slot-type decision first."""
+        path = self._taxonomy_path()
+        if path.exists():
+            tax = json.loads(path.read_text())
+            print(f"  taxonomy: reusing {path.name} ({len(tax.get('terms', {}))} term(s))")
+            return tax
+
+        print("  taxonomy: deriving domain glossary (stage 1)...")
+        response = self.client.messages.create(
+            model=GATE_MODEL,  # small structured task; flow design stays on MODEL
+            max_tokens=8192,
+            system=TAXONOMY_PROMPT,
+            messages=[{"role": "user", "content":
+                f"## Kata\n{kata}\n\n## Available Slot Types\n{slot_types}"}],
+        )
+        tax = self._extract_json(self._response_text(response))
+
+        # mechanical validation: every extends resolves into the slot-type index
+        parents = self._slot_type_parents(slot_types)
+        bad = {t: spec.get("extends") for t, spec in tax.get("terms", {}).items()
+               if spec.get("extends") not in parents}
+        if bad:
+            raise RuntimeError(f"taxonomy invalid — terms extending unknown slot types: {bad}")
+
+        # unmappable concepts block the run: they need a slot-type decision
+        if tax.get("unmappable"):
+            print("  taxonomy: UNMAPPABLE concepts — a slot-type decision is needed first:")
+            for u in tax["unmappable"]:
+                print(f"    - {u.get('kata_phrase')!r}: {u.get('why_no_slot_type_fits')}")
+            path.write_text(json.dumps(tax, indent=2))
+            self._workspace_commit(f"FA: {self.kata_name} taxonomy blocked — unmappable concepts")
+            return None
+
+        # enrich: which index gates consume/produce each term's slot type
+        # (subtype-aware upward: a gate accepting `order` consumes a term
+        # extending order). Derived, not LLM-claimed.
+        def ancestors_of(st: str) -> set[str]:
+            seen: set[str] = set()
+            cur: str | None = st
+            while cur is not None and cur not in seen:
+                seen.add(cur)
+                cur = parents.get(cur)
+            return seen
+
+        gates = self._parse_index_gates(gates_index)
+        for term, spec in tax["terms"].items():
+            anc = ancestors_of(spec["extends"])
+            spec["consumed_by"] = sorted(g for g, _, ins, _ in gates if anc & set(ins))
+            spec["produced_by"] = sorted(g for g, _, _, outs in gates if anc & set(outs))
+
+        path.write_text(json.dumps(tax, indent=2))
+        uncovered = [t for t, s in tax["terms"].items()
+                     if not s["consumed_by"] and not s["produced_by"]]
+        print(f"  taxonomy: {len(tax['terms'])} term(s) written to {path.name}"
+              + (f"; {len(uncovered)} with NO gate coverage yet: {', '.join(uncovered[:6])}"
+                 if uncovered else ""))
+        self._workspace_commit(f"FA: {self.kata_name} taxonomy_v{self.version} — "
+                               f"{len(tax['terms'])} term(s)")
+        return tax
+
+    @staticmethod
+    def _format_taxonomy(tax: dict) -> str:
+        lines = ["| term | extends | consumed_by | produced_by |",
+                 "|------|---------|-------------|-------------|"]
+        for term, s in tax.get("terms", {}).items():
+            lines.append(f"| {term} | {s.get('extends')} | "
+                         f"{', '.join(s.get('consumed_by', [])) or '—'} | "
+                         f"{', '.join(s.get('produced_by', [])) or '—'} |")
+        if tax.get("loci"):
+            lines += ["", "| locus | kind | source |", "|-------|------|--------|"]
+            for name, s in tax["loci"].items():
+                lines.append(f"| {name} | {s.get('kind')} | {s.get('source', False)} |")
+        return "\n".join(lines)
+
+    def _taxonomy_conformance_errors(self, parsed: dict, tax: dict) -> list[str]:
+        """The flow's archetypes and loci must come from the binding taxonomy."""
+        if not tax:
+            return []
+        terms = tax.get("terms", {})
+        errs = []
+        for name, aspec in parsed.get("archetypes", {}).items():
+            if name not in terms:
+                errs.append(f"archetype '{name}' is not in the binding taxonomy — "
+                            f"use the taxonomy's term for this concept, do not invent types")
+            elif isinstance(aspec, dict) and aspec.get("extends") != terms[name]["extends"]:
+                errs.append(f"archetype '{name}' extends '{aspec.get('extends')}' but the "
+                            f"taxonomy says '{terms[name]['extends']}' — the taxonomy is binding")
+        known_loci = set(tax.get("loci", {}))
+        if known_loci:
+            for name in parsed.get("loci", {}):
+                if name not in known_loci:
+                    errs.append(f"locus '{name}' is not in the binding taxonomy — "
+                                f"use the taxonomy's locus for this actor/store, do not invent loci")
+        return errs
+
     def _call_llm(self, kata: str, slot_types: str, gates_index: str, errors: str = "") -> str:
         user_prompt = build_user_prompt(kata, slot_types, gates_index, self.version,
-                                        errors, self._decided_adr_context())
-        response = self.client.messages.create(
+                                        errors, self._decided_adr_context(),
+                                        getattr(self, "_taxonomy_table", ""))
+        # Streaming is mandatory at this budget (SDK refuses non-streaming
+        # calls that could exceed 10 minutes). Fable-class models think by
+        # default; the budget must fit thinking + a full flow spec — 8192
+        # starved the text entirely (thinking ate it all → empty response).
+        with self.client.messages.stream(
             model=MODEL,
-            max_tokens=8192,
+            max_tokens=32000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
-        )
-        return response.content[0].text
+        ) as stream:
+            response = stream.get_final_message()
+        self._verify_served_model(response)
+        text = self._response_text(response)
+        if not text.strip():
+            kinds = [getattr(b, "type", "?") for b in response.content]
+            print(f"  !! empty text from model — stop_reason={response.stop_reason}, "
+                  f"blocks={kinds} (thinking likely consumed max_tokens)")
+        return text
 
     # ── parse response ─────────────────────────────────────────────────────
 
@@ -282,6 +445,8 @@ class FAAgent:
         ]
         for opt in adr.get("options", []):
             lines.append(f"### Option {opt['label']}\n{opt['description']}\n\n**Tradeoffs:** {opt.get('tradeoffs','')}\n")
+        lines.append("### Architect's option (optional)\n\n"
+                      "<!-- Add your own alternative here and name it in Decision -->\n")
         lines.append("## Decision\n\n<!-- Fill in your choice here before re-running FA -->\n")
         adr_path.write_text("\n".join(lines))
         return adr_path
@@ -353,26 +518,26 @@ class FAAgent:
         """Call LLM to produce a gate .md file from an approved ADR."""
         slot_types = (AGENT_DIR / "slot_types" / "index.md").read_text()
         response = self.client.messages.create(
-            model=MODEL,
+            model=GATE_MODEL,
             max_tokens=2048,
             system=GATE_GENERATION_PROMPT,
             messages=[{"role": "user", "content":
                 f"## Slot Types\n{slot_types}\n\n## Approved ADR\n{adr_content}"}],
         )
-        return response.content[0].text.strip()
+        return self._response_text(response).strip()
 
     def _generate_amended_gate_file(self, existing_md: str, adr_content: str) -> str:
         """Call LLM to apply an approved ADR's decision to an EXISTING gate file."""
         slot_types = (AGENT_DIR / "slot_types" / "index.md").read_text()
         response = self.client.messages.create(
-            model=MODEL,
+            model=GATE_MODEL,
             max_tokens=2048,
             system=GATE_AMENDMENT_PROMPT,
             messages=[{"role": "user", "content":
                 f"## Slot Types\n{slot_types}\n\n## Current Gate File\n{existing_md}"
                 f"\n\n## Approved ADR (apply its Decision)\n{adr_content}"}],
         )
-        return response.content[0].text.strip()
+        return self._response_text(response).strip()
 
     def _replace_index_row(self, index_path: Path, name: str, new_row: str) -> None:
         """Replace the index table row for `name` in place (append if absent)."""
@@ -427,11 +592,25 @@ class FAAgent:
                 marker.write_text("status: rejected\n")
                 continue
 
-            gate_md = self._generate_gate_file(adr_content)
-            name = self._extract_gate_name(gate_md)
-            if not name:
-                print(f"    Could not extract gate name — skipping (not marked processed, will retry next run)")
-                continue
+            # Amendment detection BEFORE any generation call (token saver: the
+            # old flow burned a full gate-generation just to learn the name).
+            # If the Decision section names exactly one existing gate, this is
+            # an amendment of that gate.
+            existing = {p.stem for p in gates_dir.glob("*.md")} - {"index"}
+            decision_body = decision.group(1) if decision else ""
+            mentioned = sorted({g for g in existing
+                                if re.search(rf"\b{re.escape(g)}\b", decision_body)})
+            amend_target = mentioned[0] if len(mentioned) == 1 else None
+
+            if amend_target is None:
+                gate_md = self._generate_gate_file(adr_content)
+                name = self._extract_gate_name(gate_md)
+                if not name:
+                    print(f"    Could not extract gate name — skipping (not marked processed, will retry next run)")
+                    continue
+            else:
+                name = amend_target
+                gate_md = ""  # amendment path never uses a fresh generation
 
             gate_file = gates_dir / f"{name}.md"
             if gate_file.exists():
@@ -611,6 +790,13 @@ class FAAgent:
 
         kata, slot_types, gates_index = self._load_context()
 
+        # Stage 1: binding domain taxonomy (kata terms → slot types → gates)
+        self._taxonomy = self._load_or_create_taxonomy(kata, slot_types, gates_index)
+        if self._taxonomy is None:
+            print("  → Resolve the unmappable concepts (slot-type decision), then re-run FA.")
+            return
+        self._taxonomy_table = self._format_taxonomy(self._taxonomy)
+
         log_dir = self._log_dir()
         run_id = log_dir.name
         log = [f"FA run — {datetime.now(timezone.utc).isoformat()}",
@@ -665,6 +851,24 @@ class FAAgent:
                     print(f"  retrying — attempt {iteration + 1}/{MAX_ITERATIONS}")
                 continue
 
+            # Binding-taxonomy conformance: cheaper than eval, checked first.
+            # A flow using invented vocabulary is wrong before it's wired.
+            tax_errs = self._taxonomy_conformance_errors(
+                parsed, getattr(self, "_taxonomy", {}) or {})
+            if tax_errs and "adrs" not in parsed:
+                print(f"  taxonomy conformance FAILED — {len(tax_errs)} violation(s).")
+                for t in tax_errs:
+                    print(f"    ✗ {t}")
+                for t in tax_errs:
+                    key = self._defect_key(t)
+                    error_history[key] = t
+                    self._touch_defect(defect_history, key, t, run_id)
+                self._save_defect_history(defect_history)
+                errors = self._format_error_history(error_history)
+                if iteration < MAX_ITERATIONS:
+                    print(f"  retrying — attempt {iteration + 1}/{MAX_ITERATIONS}")
+                continue
+
             # handle ADRs (batch — all missing gates proposed at once)
             if "adrs" in parsed:
                 written = []
@@ -676,6 +880,8 @@ class FAAgent:
                 print(msg)
                 print("  → Review and fill in Decision fields, then re-run FA.")
                 log.append(msg + " — waiting for User approval")
+                self._workspace_commit(
+                    f"FA: {self.kata_name} — {len(written)} ADR(s) proposed, awaiting decisions")
                 if "name" not in parsed:
                     self._write_log(log_dir, log)
                     return

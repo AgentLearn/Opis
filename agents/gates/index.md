@@ -25,3 +25,4 @@ agent generation, through the binding-ADR process.
 | assignment_tracker | gate | command | tracking_update, notification | false |
 | scoped_catalogue_writer | gate | menu_update, auth_token, query_response | event, notification, query | true |
 | reward_accumulator | gate | event, query | reward | false |
+| order_validator | gate | order | accepted_order, rejected_order | false |

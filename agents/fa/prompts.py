@@ -44,6 +44,52 @@ Rules:
 """
 
 
+TAXONOMY_PROMPT = """You are FA, the Flow Architect agent in the Opis Dynamic Architecture system.
+
+Your task: build the DOMAIN TAXONOMY for a kata — the complete glossary mapping
+the kata's domain concepts onto the computing-level slot types. This happens
+BEFORE any flow design; the flow will be built using ONLY these terms.
+
+Output a single JSON object, nothing else:
+
+{
+  "terms": {
+    "<domain_term_snake_case>": {
+      "extends": "<slot_type from the provided index>",
+      "kata_phrase": "<the exact kata wording this term comes from>",
+      "description": "<one line>"
+    }
+  },
+  "loci": {
+    "<locus_name_PascalCase>": {
+      "kind": "actor | store | external_service | physical_workplace",
+      "source": true,
+      "kata_phrase": "<the exact kata wording>",
+      "description": "<one line>"
+    }
+  },
+  "unmappable": [
+    {"kata_phrase": "...", "why_no_slot_type_fits": "..."}
+  ]
+}
+
+Rules:
+- Every domain concept the kata's requirements mention must appear exactly once.
+- `extends` MUST be a slot type from the provided index — never invent one.
+- `kata_phrase` is provenance: quote the kata, don't paraphrase.
+- Two terms must not mean the same thing; one term must not mean two things.
+- A concept no slot type credibly fits goes in `unmappable` (this triggers a
+  slot-type decision) — do NOT force a bad fit.
+- Include response/ack/event concepts implied by external interactions (e.g.
+  a provider's reply), not just the nouns literally present.
+- THINGS THAT ACT ARE LOCI; FACTS THAT TRAVEL ARE TERMS. A kitchen, a customer
+  app, an external mapping provider — loci. Matter (a sandwich) never flows
+  through the graph: only descriptions of it do (its order, its preparation
+  command, its completion event). `source: true` marks loci that inject pulses
+  from outside the system (actors, external services).
+"""
+
+
 GATE_AMENDMENT_PROMPT = """You are FA, the Flow Architect agent in the Opis Dynamic Architecture system.
 
 Your task: AMEND an existing gate definition file according to an approved ADR
@@ -170,12 +216,17 @@ Output a JSON object with an `adrs` array (one entry per missing gate) and NO fl
       "topic": "gate needed: <slot_type>",
       "context": "<what this gate must do and why no existing gate covers it>",
       "options": [
-        {"label": "A", "description": "...", "tradeoffs": "..."},
-        {"label": "B", "description": "...", "tradeoffs": "..."}
+        {"label": "A", "description": "...", "tradeoffs": "..."}
       ]
     }
   ]
 }
+
+Options must be GENUINE design alternatives — include exactly as many as credibly
+exist. ONE option is legitimate when no credible alternative does; in that case say
+so in its tradeoffs ("no credible alternative because ..."). NEVER invent filler
+options to reach a count — a padded option wastes the architect's review and hides
+the real decision. The architect may add their own options before deciding.
 
 Only output the flow spec once all required gates exist in the index.
 If some gates exist and some are missing, list only the missing ones in `adrs`.
@@ -213,7 +264,8 @@ Reach for these whenever a gate's real behavior is "count/wait/give up," not "wa
 
 
 def build_user_prompt(kata: str, slot_types: str, gates_index: str, version: int,
-                      previous_errors: str = "", adr_decisions: str = "") -> str:
+                      previous_errors: str = "", adr_decisions: str = "",
+                      taxonomy: str = "") -> str:
     prompt = f"""## Kata
 {kata}
 
@@ -225,6 +277,16 @@ def build_user_prompt(kata: str, slot_types: str, gates_index: str, version: int
 
 ## Task
 Produce flow_v{version}.json for this kata.
+"""
+    if taxonomy:
+        prompt += f"""
+## Domain Taxonomy (BINDING)
+The domain vocabulary below is FIXED. Your flow's `archetypes` section must use
+EXACTLY these terms with EXACTLY these `extends` — never invent, rename, or drop
+types mid-iteration. `consumed_by`/`produced_by` list the index gates whose
+slots accept/emit each term's slot type — use them to select gates. If a term
+you need is missing, that is a taxonomy gap: say so in an ADR, do not improvise.
+{taxonomy}
 """
     if adr_decisions:
         prompt += f"""

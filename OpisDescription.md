@@ -54,7 +54,7 @@ The repository starts empty. FA proposes new gates as it encounters slot types t
 
 If multiple candidate gates exist for a slot type, FA creates an ADR listing each option for the User to approve before proceeding.
 
-ADRs always present multiple options — they are never single-recommendation documents.
+ADR options are genuine design alternatives — exactly as many as credibly exist. One option is legitimate when no credible alternative does (the ADR must say why); invented filler options are forbidden — they waste the architect's review and hide the real decision. Every ADR leaves space for the architect to add their own option before deciding.
 
 **Gate file format** — structured Markdown with YAML frontmatter:
 
