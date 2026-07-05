@@ -102,6 +102,9 @@ Rules:
   frontmatter format as the original). Output ONLY the file content.
 - Change only what the ADR decision requires. Preserve every other frontmatter
   field and prose section as-is.
+- NEVER change the `name:` frontmatter field. A gate's identity is fixed —
+  amendments change its contract, never its name (a different name would be
+  clamped back anyway).
 - PRESERVE the `status:` and `confidence:` frontmatter lines unchanged — an
   amended contract is still a draft until GA re-validates it.
 - All slot types must come from the provided slot_types index. Do not invent

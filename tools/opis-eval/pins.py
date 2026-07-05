@@ -20,11 +20,13 @@ Evidence"):
   * Pin scope = gates + taxonomy. Verifier versions are a separate problem
     (may join the pin later — deliberately NOT included now).
 
-Current file layout note: contracts live as single agents/gates/<template>.md
-files with a `version:` frontmatter field (default 1 when absent). The
-append-only contract_vN.md split happens at the first real amendment; until
-then a hash mismatch against a pinned flow is ALWAYS an error — there is no
-legitimate in-place change to a pinned contract.
+File layout (since the first real amendment, 2026-07-05): the CURRENT
+contract lives as agents/gates/<template>.md with a `version:` frontmatter
+field (default 1 when absent). Every superseded version is archived verbatim
+at agents/gates/archive/<template>_v<N>.md — append-only, immutable. A pin
+resolves to the current file when versions match, else into the archive;
+a hash mismatch against the resolved file is ALWAYS an error — there is no
+legitimate in-place change to a pinned contract version.
 
 Usage:
   python tools/opis-eval/pins.py <flow.json> [--gates-dir D] [--slot-types F]
@@ -62,6 +64,23 @@ def frontmatter_version(path: Path) -> int:
     text = path.read_text(errors="replace")
     m = re.search(r"^[Vv]ersion:\s*(\d+)\s*$", text, re.MULTILINE)
     return int(m.group(1)) if m else 1
+
+
+ARCHIVE_DIR_NAME = "archive"
+
+
+def contract_path(gates_dir: Path, template: str,
+                  version: int | None = None) -> Path:
+    """Resolve a template's contract file. version=None → the current file.
+    A pinned version that doesn't match the current file's frontmatter
+    resolves into the append-only archive (gates/archive/<t>_v<N>.md) —
+    where the amendment path parked it."""
+    current = gates_dir / f"{template}.md"
+    if version is None:
+        return current
+    if current.exists() and frontmatter_version(current) == version:
+        return current
+    return gates_dir / ARCHIVE_DIR_NAME / f"{template}_v{version}.md"
 
 
 def flow_templates(flow: dict) -> set[str]:
@@ -134,10 +153,12 @@ def verify_pins(flow: dict, gates_dir: Path = DEFAULT_GATES_DIR,
 
     for t in sorted(used & set(pinned)):
         pin = pinned[t]
-        contract = gates_dir / f"{t}.md"
+        contract = contract_path(gates_dir, t, pin.get("version"))
         if not contract.exists():
-            errors.append(f"pinned contract '{t}' missing on disk "
-                          f"(pinned v{pin.get('version')})")
+            errors.append(
+                f"pinned contract '{t}' v{pin.get('version')} missing on disk "
+                f"(neither current file at that version nor {contract.name} "
+                f"in the archive) — superseded versions are archived, never deleted")
             continue
         actual_hash = file_hash(contract)
         actual_version = frontmatter_version(contract)

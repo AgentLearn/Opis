@@ -194,14 +194,33 @@ class FAAgent:
             return tax
 
         print("  taxonomy: deriving domain glossary (stage 1)...")
-        response = self.client.messages.create(
-            model=GATE_MODEL,  # small structured task; flow design stays on MODEL
-            max_tokens=8192,
-            system=TAXONOMY_PROMPT,
-            messages=[{"role": "user", "content":
-                f"## Kata\n{kata}\n\n## Available Slot Types\n{slot_types}"}],
-        )
-        tax = self._extract_json(self._response_text(response))
+        # Shape-guarded with one retry: a response without a non-empty 'terms'
+        # dict used to KeyError deep in enrichment (2026-07-05, silicon v2 run)
+        # — malformed LLM output must be a clean, loud failure, never a crash.
+        tax = None
+        for attempt in (1, 2):
+            response = self.client.messages.create(
+                model=GATE_MODEL,  # small structured task; flow design stays on MODEL
+                max_tokens=8192,
+                system=TAXONOMY_PROMPT,
+                messages=[{"role": "user", "content":
+                    f"## Kata\n{kata}\n\n## Available Slot Types\n{slot_types}"}],
+            )
+            raw = self._response_text(response)
+            try:
+                cand = self._extract_json(raw)
+            except json.JSONDecodeError as e:
+                print(f"  taxonomy: unparseable response (attempt {attempt}/2): {e}")
+                continue
+            if isinstance(cand.get("terms"), dict) and cand["terms"]:
+                tax = cand
+                break
+            print(f"  taxonomy: response has no non-empty 'terms' dict "
+                  f"(attempt {attempt}/2) — keys: {sorted(cand)[:8]}")
+        if tax is None:
+            raise RuntimeError(
+                "taxonomy generation failed twice — no usable 'terms' in the "
+                "model's response; re-run FA (nothing was written)")
 
         # mechanical validation: every extends resolves into the slot-type index
         parents = self._slot_type_parents(slot_types)
@@ -603,6 +622,15 @@ class FAAgent:
         match = re.search(r"^name:\s*(\S+)", gate_md, re.MULTILINE)
         return match.group(1) if match else None
 
+    @staticmethod
+    def _set_frontmatter_version(gate_md: str, version: int) -> str:
+        """Set (or insert, after `name:`) the frontmatter `version:` field."""
+        if re.search(r"^version:\s*\d+\s*$", gate_md, re.MULTILINE):
+            return re.sub(r"^version:\s*\d+\s*$", f"version: {version}",
+                          gate_md, count=1, flags=re.MULTILINE)
+        return re.sub(r"^(name:.*)$", rf"\1\nversion: {version}",
+                      gate_md, count=1, flags=re.MULTILINE)
+
     def _generate_index_row(self, gate_md: str) -> str:
         """Derive the gates/index.md table row deterministically from the gate
         file's own frontmatter — no LLM call. The frontmatter already IS the
@@ -665,11 +693,37 @@ class FAAgent:
                 print(f"    Gate {name} exists — applying contract amendment")
                 amended = self._generate_amended_gate_file(
                     gate_file.read_text(), adr_content)
-                if self._extract_gate_name(amended) != name:
-                    print(f"    Amendment renamed the gate — rejected "
-                          f"(not marked processed, will retry next run)")
+                got = self._extract_gate_name(amended)
+                if got != name:
+                    # A gate's identity is fixed: amendments change contracts,
+                    # never names. Clamp the frontmatter back instead of
+                    # rejecting — rejection burned the generation AND retried
+                    # forever on every subsequent run (bitten: ADR-012).
+                    print(f"    Amendment renamed the gate to '{got}' — "
+                          f"clamping name back to '{name}'")
+                    amended = re.sub(r"^name:\s*\S+", f"name: {name}",
+                                     amended, count=1, flags=re.MULTILINE)
+                    if self._extract_gate_name(amended) != name:
+                        print("    no clampable frontmatter name line — "
+                              "rejected (not marked processed, will retry next run)")
+                        continue
+                # Append-only contract versioning: the outgoing contract may
+                # be pinned by committed flows — archive it verbatim, then
+                # bump the amended file's version. Pinned flows keep proving
+                # against the archive; new flows pin the new version.
+                pins_mod = self._pins_module()
+                old_version = pins_mod.frontmatter_version(gate_file)
+                archive = gates_dir / "archive" / f"{name}_v{old_version}.md"
+                archive.parent.mkdir(exist_ok=True)
+                if archive.exists() and archive.read_bytes() != gate_file.read_bytes():
+                    print(f"    !! archive {archive.name} already exists with "
+                          f"DIFFERENT content — refusing to overwrite an "
+                          f"immutable version; resolve manually")
                     continue
+                archive.write_bytes(gate_file.read_bytes())
+                amended = self._set_frontmatter_version(amended, old_version + 1)
                 gate_file.write_text(amended)
+                print(f"    archived {archive.name}; contract now v{old_version + 1}")
                 self._replace_index_row(
                     index_path, name, self._generate_index_row(amended))
                 print(f"    Gate amended: {gate_file.name}; index row refreshed.")

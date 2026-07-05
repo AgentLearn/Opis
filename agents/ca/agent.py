@@ -237,17 +237,36 @@ class CAAgent:
         return sorted({g.get("gate_template") for g in
                        self.spec.get("gates", {}).values() if g.get("gate_template")})
 
+    @staticmethod
+    def _pins_module():
+        """Load tools/opis-eval/pins.py by file path (hyphen-dir, same dance
+        as FA's loaders)."""
+        import importlib.util
+        pins_path = TOOLS_DIR / "opis-eval" / "pins.py"
+        spec = importlib.util.spec_from_file_location("opis_pins", pins_path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault("opis_pins", mod)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
     def _load_gate_contracts(self) -> str:
+        """The contracts CA implements are the ones the flow was PROVED
+        against — resolved through the pin block (archive-aware), never
+        blindly the current files. An amendment landing between FA's commit
+        and CA's run must not silently change what CA builds."""
+        pins_mod = self._pins_module()
+        pinned = (self.spec.get("pins") or {}).get("gates") or {}
         chunks, missing = [], []
         for t in self._used_templates():
-            p = AGENTS_DIR / "gates" / f"{t}.md"
+            pin = pinned.get(t)
+            p = pins_mod.contract_path(AGENTS_DIR / "gates", t,
+                                       pin.get("version") if pin else None)
             if p.exists():
                 chunks.append(f"### {t}\n{p.read_text()}")
             else:
-                missing.append(t)
+                missing.append(f"{t} (v{pin.get('version') if pin else '?'})")
         if missing:
-            # pins guarantee this can't happen for a properly committed flow
-            raise SystemExit(f"CA: flow pins template(s) with no contract file: {missing}")
+            raise SystemExit(f"CA: pinned contract(s) unresolvable: {missing}")
         return "\n\n".join(chunks)
 
     # ── preflight ──────────────────────────────────────────────────────────

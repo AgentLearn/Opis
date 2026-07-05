@@ -88,6 +88,28 @@ def run_eval(flow_path: Path, gates_dir: Path) -> bool:
     return result.returncode != 1
 
 
+def pinned_view(spec: dict, gates_dir: Path) -> Path:
+    """A pinned flow's proofs must re-run against the EXACT contracts it was
+    proved with — not whatever the current files say (an amendment moves the
+    current file; the flow doesn't move with it). Build a temp gates dir
+    where each pinned template resolves through the archive when needed.
+    Flows without pins (legacy) just use the live dir."""
+    pins = (spec.get("pins") or {}).get("gates")
+    if not pins:
+        return gates_dir
+    import shutil
+    import tempfile
+    view = Path(tempfile.mkdtemp(prefix="opis-pinned-view-"))
+    for t in pins_mod.flow_templates(spec):
+        pin = pins.get(t)
+        src = pins_mod.contract_path(gates_dir, t,
+                                     pin.get("version") if pin else None)
+        if src.exists():
+            shutil.copy(src, view / f"{t}.md")
+        # a missing resolved contract is verify_pins' error to report
+    return view
+
+
 def check_flow(flow_path: Path, gates_dir: Path) -> tuple[list[str], int]:
     """Run the full success gate against one flow. Returns (issues, n_reqs)."""
     issues: list[str] = []
@@ -96,14 +118,15 @@ def check_flow(flow_path: Path, gates_dir: Path) -> tuple[list[str], int]:
         issues.append("opis-eval reports structural errors (exit 1)")
 
     spec = eval_mod.load_spec(flow_path)
+    proof_gates_dir = pinned_view(spec, gates_dir)
 
-    results = proof_mod.verify_requirements(spec, gates_dir)
+    results = proof_mod.verify_requirements(spec, proof_gates_dir)
     for r in results:
         if r["status"] != "proved":
             detail = "; ".join(r.get("issues", [])) or "unproved"
             issues.append(f"requirement {r['id']} unproved — {detail}")
 
-    for conf in proof_mod.check_gate_conformance(spec, gates_dir):
+    for conf in proof_mod.check_gate_conformance(spec, proof_gates_dir):
         issues.append(f"gate conformance — {conf['message']}")
 
     # pins: a committed flow is only reproducible against the exact contracts
