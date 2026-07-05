@@ -461,13 +461,38 @@ class FAAgent:
         flow_path.write_text(json.dumps(spec, indent=2))
         return flow_path
 
+    @staticmethod
+    def _pins_module():
+        """Load tools/opis-eval/pins.py by file path (same hyphen-dir dance
+        as _proof_module)."""
+        import importlib.util
+        pins_path = TOOLS_DIR / "opis-eval" / "pins.py"
+        spec = importlib.util.spec_from_file_location("opis_pins", pins_path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault("opis_pins", mod)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
     def _commit_flow(self, spec: dict) -> Path:
         """Promote a structurally-clean, fully-proved spec to a real
         flow_vN.json. Called exactly once per successful run — failed
-        iterations never produce a permanent version."""
+        iterations never produce a permanent version.
+
+        The committed flow carries a `pins` block freezing the exact gate
+        contracts + slot-type taxonomy the proofs ran against (version +
+        content hash). A later contract/taxonomy change never moves this
+        flow — upgrade is an explicit re-prove producing a new version."""
         flow_path = self._flow_path(self.version)
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         spec["version"] = self.version
+        pins_mod = self._pins_module()
+        pins, pin_errors = pins_mod.compute_pins(spec, AGENT_DIR / "gates")
+        if pin_errors:
+            # a used template with no contract file should have been caught by
+            # conformance long before commit — treat as a hard bug, not a skip
+            raise RuntimeError("pin compute failed at commit: "
+                               + "; ".join(pin_errors))
+        spec["pins"] = pins
         flow_path.write_text(json.dumps(spec, indent=2))
         # update symlink to point to current version
         symlink = self.output_dir / "flow" / "flow_current.json"
@@ -475,6 +500,26 @@ class FAAgent:
             symlink.unlink()
         symlink.symlink_to(flow_path.name)
         return flow_path
+
+    def _write_evidence(self, flow_path) -> None:
+        """Generate the evidence report (evidence_vN.json + .md) beside the
+        committed flow — static layers now; twin/co-sim evidence attaches in
+        later runs that produce those reports. Best-effort: an evidence
+        failure never un-commits a proved flow, but it is loud."""
+        try:
+            import subprocess
+            r = subprocess.run(
+                [sys.executable, str(TOOLS_DIR / "opis-eval" / "evidence.py"),
+                 str(flow_path), "--kata", self.kata_name],
+                capture_output=True, text=True, timeout=120,
+            )
+            for line in (r.stdout or "").strip().splitlines():
+                print(f"  {line.strip()}")
+            if r.returncode != 0:
+                print(f"  WARNING: evidence report failed (exit {r.returncode}): "
+                      f"{(r.stderr or '').strip()[:300]}")
+        except Exception as e:  # noqa: BLE001
+            print(f"  WARNING: evidence report failed: {e}")
 
     # ── log ────────────────────────────────────────────────────────────────
 
@@ -910,8 +955,9 @@ class FAAgent:
                     print(f"  gate conformance PASS — every instance honors its claimed template.")
                     log.append("FA complete — structurally clean, all requirements proved, "
                                 "all gates conform to their claimed templates.")
-                    self._commit_flow(parsed)
+                    flow_path = self._commit_flow(parsed)
                     print(f"  flow committed: flow_v{self.version}.json")
+                    self._write_evidence(flow_path)
                     n_fixed = self._mark_all_fixed(defect_history, run_id)
                     self._save_defect_history(defect_history)
                     if n_fixed:

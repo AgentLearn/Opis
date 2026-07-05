@@ -51,6 +51,7 @@ def _load(name: str, path: Path):
 
 proof_mod = _load("opis_proof", HERE / "proof.py")
 eval_mod = sys.modules["opis_eval"]  # registered by proof.py's own loader
+pins_mod = _load("opis_pins", HERE / "pins.py")
 
 
 # ── ANSI (reuse eval.py's helpers) ────────────────────────────────────────────
@@ -104,6 +105,17 @@ def check_flow(flow_path: Path, gates_dir: Path) -> tuple[list[str], int]:
 
     for conf in proof_mod.check_gate_conformance(spec, gates_dir):
         issues.append(f"gate conformance — {conf['message']}")
+
+    # pins: a committed flow is only reproducible against the exact contracts
+    # + taxonomy it was proved with. Errors (hash/version mismatch, unpinned
+    # template) are regressions; warnings (legacy no-pins, stale pin) pass
+    # with a notice — same tolerance policy as eval warnings.
+    slot_types = gates_dir.parent / "slot_types" / "index.md"
+    pin_errors, pin_warnings = pins_mod.verify_pins(spec, gates_dir, slot_types)
+    for e in pin_errors:
+        issues.append(f"pins — {e}")
+    for w in pin_warnings:
+        print(warn(f"    pins — {w}"))
 
     return issues, len(results)
 
