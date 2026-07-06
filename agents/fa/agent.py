@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -111,26 +112,64 @@ class FAAgent:
 
     # ── LLM call ──────────────────────────────────────────────────────────
 
-    def _decided_adr_context(self, max_chars: int = 6000) -> str:
-        """Concatenate the Context + Decision of every decided (processed) ADR
-        for this kata. Injected into every flow iteration so decisions bind
-        future drafts too — a rejected proposal must never be re-proposed."""
+    def _decided_adr_context(self, max_chars: int = 12000,
+                             decisions_only: bool = False) -> str:
+        """Concatenate the decided (processed) ADRs for this kata, injected
+        into every flow iteration so decisions bind future drafts too — a
+        rejected proposal must never be re-proposed.
+
+        DECISIONS ARE NEVER DROPPED (2026-07-05 fix). The old version built
+        oldest-first and cut with text[:6000]; once the ADR log outgrew the
+        cap, the NEWEST decisions silently vanished from FA's context — the
+        run right after ADR-017 was decided re-litigated the same problem
+        and proposed ADR-018, loyal to old 008 and blind to 017. Now:
+        every Decision block is always included (a binding decision that
+        exceeds a token budget is still binding); Context blocks are
+        attached newest-first only while budget remains, since old contexts
+        are mostly embodied in the gate library already. Ordered newest
+        first so the freshest bindings lead."""
         adr_dir = self._adr_dir()
         if not adr_dir.exists():
             return ""
-        chunks = []
-        for path in sorted(adr_dir.glob("*.md")):
+        entries = []  # newest first: (stem, context, decision)
+        for path in sorted(adr_dir.glob("*.md"), reverse=True):
             if not self._processed_marker(path).exists():
                 continue
             content = path.read_text()
             ctx = re.search(r"## Context\s*\n(.*?)(?=\n## )", content, re.DOTALL)
             dec = re.search(r"## Decision\s*\n(.*)", content, re.DOTALL)
             if dec:
-                chunks.append(
-                    f"### {path.stem}\nContext: {ctx.group(1).strip() if ctx else '(none)'}\n"
-                    f"Decision: {dec.group(1).strip()}")
-        text = "\n\n".join(chunks)
-        return text[:max_chars]
+                entries.append((path.stem,
+                                ctx.group(1).strip() if ctx else "",
+                                dec.group(1).strip()))
+        if not entries:
+            return ""
+        # pass 1 — every decision, unconditionally
+        decision_blocks = {stem: f"### {stem}\nDecision: {dec}"
+                           for stem, _, dec in entries}
+        if decisions_only:
+            # lean mode (taxonomy stage): the binding calls, none of the
+            # option-tradeoff prose — keeps small-model prompts small.
+            return ("(newest first; all decisions included)\n\n"
+                    + "\n\n".join(decision_blocks[s] for s, _, _ in entries))
+        budget = max_chars - sum(len(b) + 2 for b in decision_blocks.values())
+        # pass 2 — contexts newest-first while budget allows
+        with_ctx: set[str] = set()
+        for stem, ctx, _ in entries:
+            if ctx and len(ctx) + 10 <= budget:
+                with_ctx.add(stem)
+                budget -= len(ctx) + 10
+        chunks = []
+        for stem, ctx, dec in entries:
+            if stem in with_ctx:
+                chunks.append(f"### {stem}\nContext: {ctx}\nDecision: {dec}")
+            else:
+                chunks.append(decision_blocks[stem])
+        omitted = len(entries) - len(with_ctx)
+        header = ("(newest first; all decisions included"
+                  + (f"; context omitted for {omitted} older ADR(s) — "
+                     f"decisions still bind" if omitted else "") + ")\n\n")
+        return header + "\n\n".join(chunks)
 
     @staticmethod
     def _response_text(response) -> str:
@@ -189,28 +228,60 @@ class FAAgent:
         concepts need a slot-type decision first."""
         path = self._taxonomy_path()
         if path.exists():
-            tax = json.loads(path.read_text())
-            print(f"  taxonomy: reusing {path.name} ({len(tax.get('terms', {}))} term(s))")
-            return tax
+            # STALENESS (2026-07-05): an ADR decided AFTER this taxonomy was
+            # written may add binding vocabulary — reusing the old file would
+            # make the decided terms illegal in flow conformance. Regenerate
+            # whenever any processed-ADR marker is newer than the file.
+            newest_marker = max(
+                (m.stat().st_mtime for m in self._adr_dir().glob("*.processed")),
+                default=0.0)
+            if path.stat().st_mtime >= newest_marker:
+                tax = json.loads(path.read_text())
+                print(f"  taxonomy: reusing {path.name} ({len(tax.get('terms', {}))} term(s))")
+                return tax
+            print(f"  taxonomy: {path.name} is older than the newest decided "
+                  f"ADR — regenerating with decisions in context")
 
         print("  taxonomy: deriving domain glossary (stage 1)...")
         # Shape-guarded with one retry: a response without a non-empty 'terms'
         # dict used to KeyError deep in enrichment (2026-07-05, silicon v2 run)
         # — malformed LLM output must be a clean, loud failure, never a crash.
         tax = None
+        # Decided ADRs bind the taxonomy too (2026-07-05): a term-addition
+        # decided via ADR must appear with EXACTLY the decided name — stage 1
+        # deriving from the kata alone would invent its own synonyms and the
+        # flow could never legally use the decided vocabulary.
+        # Decisions only — the taxonomy stage needs "term X extends Y", not
+        # the full option-tradeoff contexts (which bloated the prompt enough
+        # to truncate the 8k-token response on first deployment, 2026-07-05).
+        adr_ctx = self._decided_adr_context(decisions_only=True)
+        tax_user = f"## Kata\n{kata}\n\n## Available Slot Types\n{slot_types}"
+        if adr_ctx:
+            tax_user += (
+                "\n\n## Decided ADRs (BINDING)\n"
+                "Any domain term a Decision below adds MUST appear in your "
+                "taxonomy under exactly that name with the decided extends; "
+                "rejected proposals must not reappear under any name.\n\n"
+                + adr_ctx)
         for attempt in (1, 2):
             response = self.client.messages.create(
                 model=GATE_MODEL,  # small structured task; flow design stays on MODEL
-                max_tokens=8192,
+                max_tokens=16000,
                 system=TAXONOMY_PROMPT,
-                messages=[{"role": "user", "content":
-                    f"## Kata\n{kata}\n\n## Available Slot Types\n{slot_types}"}],
+                messages=[{"role": "user", "content": tax_user}],
             )
             raw = self._response_text(response)
             try:
                 cand = self._extract_json(raw)
             except json.JSONDecodeError as e:
+                stop = getattr(response, "stop_reason", "?")
                 print(f"  taxonomy: unparseable response (attempt {attempt}/2): {e}")
+                print(f"    stop_reason={stop}, text len={len(raw)}, "
+                      f"head={raw[:200]!r}")
+                fail_path = self.output_dir / f"taxonomy_failure_attempt{attempt}.txt"
+                fail_path.parent.mkdir(parents=True, exist_ok=True)
+                fail_path.write_text(f"stop_reason: {stop}\n\n{raw}")
+                print(f"    raw response saved: {fail_path.name}")
                 continue
             if isinstance(cand.get("terms"), dict) and cand["terms"]:
                 tax = cand
@@ -329,31 +400,55 @@ class FAAgent:
         """Extract JSON from LLM response, tolerating markdown fences AND
         leading prose before the JSON object (the model sometimes "thinks
         out loud" — e.g. "Let me map the kata requirements..." — before
-        emitting the actual JSON, with no code fence around it)."""
-        # 1) fenced ```json ... ``` block, if present
-        match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-        if match:
-            return json.loads(match.group(1))
-        # 2) the whole trimmed text is valid JSON
+        emitting the actual JSON, with no code fence around it).
+
+        SHAPE-AWARE (2026-07-05 fix): the response may contain several JSON
+        objects — small illustrative snippets in prose plus the actual flow
+        spec. The old code returned the FIRST parseable object, so a tiny
+        snippet could shadow the flow spec ("No flow spec in response" run
+        kill). Now: collect every candidate (all fenced blocks, whole text,
+        inline scan), return the first one that looks like a flow spec or an
+        ADR batch; if none qualifies, return the LARGEST candidate so the
+        caller's diagnostics see the most substantial object."""
+        candidates: list[dict] = []
+
+        def _try(s: str) -> None:
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+            except json.JSONDecodeError:
+                pass
+
+        # 1) every fenced ```json ... ``` block (not just the first)
+        for match in re.finditer(r"```(?:json)?\s*([\s\S]+?)\s*```", text):
+            _try(match.group(1))
+        # 2) the whole trimmed text
         stripped = text.strip()
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            pass
-        # 3) scan for the first top-level JSON object anywhere in the text —
-        # find each '{' and try to decode starting there, keeping the first
-        # one that parses (handles leading prose with no fence at all).
+        _try(stripped)
+        # 3) scan for top-level JSON objects anywhere in the text
         decoder = json.JSONDecoder()
-        for i, ch in enumerate(stripped):
-            if ch != "{":
+        i = 0
+        while i < len(stripped):
+            if stripped[i] != "{":
+                i += 1
                 continue
             try:
-                obj, _ = decoder.raw_decode(stripped, i)
-                return obj
+                obj, end = decoder.raw_decode(stripped, i)
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+                i = end
             except json.JSONDecodeError:
-                continue
-        # nothing parsed — raise the original error against the full text
-        # so the caller's error message still shows something useful.
+                i += 1
+
+        # prefer a flow spec or ADR batch over incidental snippets
+        for obj in candidates:
+            if "name" in obj or "adrs" in obj:
+                return obj
+        if candidates:
+            return max(candidates, key=lambda o: len(json.dumps(o)))
+        # nothing parsed — raise against the full text so the caller's
+        # error message still shows something useful.
         return json.loads(stripped)
 
     # ── eval ───────────────────────────────────────────────────────────────
@@ -603,6 +698,26 @@ class FAAgent:
         )
         return self._response_text(response).strip()
 
+    def _lint_contract(self, gate_file: Path) -> None:
+        """ADVISORY prose-exceeds-slots lint on a just-written contract.
+        4/4 CA falsifications to date were this class — surface suspects at
+        write time, before any flow is proved against them. Warnings only:
+        printed, never blocking (the lint is a heuristic; falsification
+        stays CA's job, and amendment stays the User's decision via ADR)."""
+        lint = Path(__file__).parent.parent.parent / "tools" / "opis-eval" / "contract_lint.py"
+        try:
+            result = subprocess.run(
+                [sys.executable, str(lint), str(gate_file), "--quiet"],
+                capture_output=True, text=True, timeout=30)
+        except Exception as e:  # advisory — never fail the run
+            print(f"    contract-lint skipped ({e})")
+            return
+        out = result.stdout.strip()
+        if result.returncode == 2 and out:
+            print(f"    ⚠ contract-lint: prose-exceeds-slots suspect(s) in {gate_file.name}:")
+            for line in out.splitlines():
+                print(f"      {line}")
+
     def _replace_index_row(self, index_path: Path, name: str, new_row: str) -> None:
         """Replace the index table row for `name` in place (append if absent)."""
         lines = index_path.read_text().splitlines()
@@ -665,6 +780,20 @@ class FAAgent:
                 marker.write_text("status: rejected\n")
                 continue
 
+            # TAXONOMY ADRs (2026-07-05): a decided term-addition ADR creates
+            # no gate — it binds through (a) the decided-ADR context injected
+            # into flow iterations and (b) the taxonomy stage, which also
+            # receives decided ADRs and regenerates when a marker is newer
+            # than the taxonomy file. Without this check the generic path
+            # below would fabricate a gate .md out of a vocabulary decision.
+            title_line = adr_content.splitlines()[0] if adr_content else ""
+            if ("taxonomy_gap" in adr_path.stem
+                    or re.search(r"taxonomy\W{0,3}gap", title_line, re.I)):
+                print(f"    Decision: taxonomy term addition — no gate; "
+                      f"binds via taxonomy stage + decision context")
+                marker.write_text("status: taxonomy\n")
+                continue
+
             # Amendment detection BEFORE any generation call (token saver: the
             # old flow burned a full gate-generation just to learn the name).
             # If the Decision section names exactly one existing gate, this is
@@ -676,11 +805,29 @@ class FAAgent:
             amend_target = mentioned[0] if len(mentioned) == 1 else None
 
             if amend_target is None:
-                gate_md = self._generate_gate_file(adr_content)
-                name = self._extract_gate_name(gate_md)
-                if not name:
-                    print(f"    Could not extract gate name — skipping (not marked processed, will retry next run)")
+                # Generated contracts are VERIFIED before they touch disk
+                # (2026-07-05): a response missing the closing frontmatter
+                # `---` once wrote a parser-invisible gate file whose index
+                # row derived as '?' — FA then couldn't see its own gate and
+                # re-proposed it as a fresh ADR. One repair retry, then skip
+                # loudly (unprocessed → retried next run).
+                gate_md = None
+                pm = self._proof_module()
+                for gen_attempt in (1, 2):
+                    cand_md = self._generate_gate_file(adr_content)
+                    fm = pm.parse_gate_frontmatter(cand_md)
+                    if fm.get("name") and fm.get("input_slots"):
+                        gate_md = cand_md
+                        break
+                    print(f"    generated contract failed frontmatter "
+                          f"verification (attempt {gen_attempt}/2): "
+                          f"name={fm.get('name')!r}, "
+                          f"input_slots={len(fm.get('input_slots', []))}")
+                if gate_md is None:
+                    print(f"    Could not generate a verifiable gate file — "
+                          f"skipping (not marked processed, will retry next run)")
                     continue
+                name = fm["name"]
             else:
                 name = amend_target
                 gate_md = ""  # amendment path never uses a fresh generation
@@ -707,6 +854,18 @@ class FAAgent:
                         print("    no clampable frontmatter name line — "
                               "rejected (not marked processed, will retry next run)")
                         continue
+                # Same frontmatter verification as the creation path
+                # (2026-07-05): _extract_gate_name greps a name line, which
+                # survives a broken frontmatter block (e.g. missing closing
+                # `---`) that parse_gate_frontmatter — and therefore the
+                # index row, pins, and conformance — cannot see.
+                amended_fm = self._proof_module().parse_gate_frontmatter(amended)
+                if not (amended_fm.get("name") and amended_fm.get("input_slots")):
+                    print(f"    amended contract failed frontmatter verification "
+                          f"(name={amended_fm.get('name')!r}, input_slots="
+                          f"{len(amended_fm.get('input_slots', []))}) — "
+                          f"rejected (not marked processed, will retry next run)")
+                    continue
                 # Append-only contract versioning: the outgoing contract may
                 # be pinned by committed flows — archive it verbatim, then
                 # bump the amended file's version. Pinned flows keep proving
@@ -727,6 +886,7 @@ class FAAgent:
                 self._replace_index_row(
                     index_path, name, self._generate_index_row(amended))
                 print(f"    Gate amended: {gate_file.name}; index row refreshed.")
+                self._lint_contract(gate_file)
                 marker.write_text(f"gate: {name}\nstatus: amended\n")
                 created += 1
                 continue
@@ -739,6 +899,7 @@ class FAAgent:
             with open(index_path, "a") as f:
                 f.write(f"| {row} |\n")
             print(f"    Index updated.")
+            self._lint_contract(gate_file)
             marker.write_text(f"gate: {name}\nstatus: created\n")
             created += 1
 
@@ -929,6 +1090,10 @@ class FAAgent:
 
             raw = self._call_llm(kata, slot_types, gates_index, call_errors)
             log.append(f"LLM response ({len(raw)} chars)")
+            # Always persist the raw response — when extraction goes wrong
+            # (wrong-shaped JSON, truncation) this is the ONLY diagnostic.
+            log_dir.mkdir(parents=True, exist_ok=True)
+            (log_dir / f"response_iter{iteration}.txt").write_text(raw)
 
             try:
                 parsed = self._extract_json(raw)
@@ -986,8 +1151,29 @@ class FAAgent:
                     return
 
             if "name" not in parsed:
-                log.append("No flow spec in response.")
-                break
+                # RETRYABLE (2026-07-05 fix): this used to `break`, killing
+                # the whole run on iteration 1 while the console claimed all
+                # 5 iterations were spent — sibling of the json-parse-error
+                # bug fixed 2026-07-04. A wrong-shaped response is a defect
+                # the model can correct, not a run-ending condition.
+                keys_seen = ", ".join(sorted(parsed.keys())[:12]) or "(empty object)"
+                log.append(f"No flow spec in response — parsed JSON keys: {keys_seen}")
+                print(f"  no flow spec in response (keys: {keys_seen}) — retryable defect.")
+                key = "no-flow-spec"
+                line = (
+                    "Your previous response contained JSON, but it was not a flow "
+                    f"spec (keys seen: {keys_seen}). Respond with ONE JSON object: "
+                    "either the complete flow spec (with name, version, archetypes, "
+                    "loci, gates, synapses, requirements) or an ADR batch "
+                    "(with adrs). No illustrative JSON snippets in prose."
+                )
+                error_history[key] = line
+                self._touch_defect(defect_history, key, line, run_id)
+                self._save_defect_history(defect_history)
+                errors = self._format_error_history(error_history)
+                if iteration < MAX_ITERATIONS:
+                    print(f"  retrying — attempt {iteration + 1}/{MAX_ITERATIONS}")
+                continue
 
             flow_path = self._write_scratch(parsed)
             log.append(f"scratch flow written: {flow_path}")

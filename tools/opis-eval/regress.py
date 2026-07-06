@@ -231,6 +231,22 @@ def main() -> None:
             for sub in line.splitlines():
                 print(err(f"  {sub}"))
 
+    # ADVISORY: prose-exceeds-slots lint over the current library. Heuristic
+    # warnings only — NEVER counted as regressions (4/4 CA falsifications to
+    # date were this class; the lint shifts it left of CA, but a heuristic
+    # must not be able to turn the board red).
+    print(hdr("Contract lint (prose-exceeds-slots, advisory)"))
+    lint_result = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "contract_lint.py"),
+         str(gates_dir), "--quiet"],
+        capture_output=True, text=True)
+    lint_out = lint_result.stdout.strip()
+    if lint_result.returncode == 0 and not lint_out:
+        print(ok("no prose-exceeds-slots suspects in the gate library"))
+    else:
+        for line in lint_out.splitlines():
+            print(c(f"  {line}", YELLOW))
+
     print()
     if total_regressions == 0:
         print(c(f"✓ all {len(flows)} committed flow(s) and {len(internals)} gate "

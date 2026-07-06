@@ -21,11 +21,13 @@ agent generation, through the binding-ADR process.
 | payment_authorizer | regulator | payment, reward | payment_confirmed, payment_failed | false |
 | queue_based_estimator | gate | query, location, query_response | estimate | false |
 | routing_decision_aggregator | gate | query, query_response | query, routing_decision | false |
-| routed_command_dispatcher | gate | accepted_order, routing_decision, location | command, notification | false |
-| assignment_tracker | gate | command | tracking_update, notification | false |
+| routed_command_dispatcher | gate | accepted_order, routing_decision, location | command | false |
+| assignment_tracker | gate | command, location | tracking_update, notification | false |
 | scoped_catalogue_writer | gate | menu_update, auth_token, query_response | event, notification, query | true |
 | reward_accumulator | gate | event, query | reward | false |
 | order_validator | gate | order | accepted_order, rejected_order | false |
 | provider_query_resolver | gate | query | query_response, event | false |
-| command_completion_recorder | gate | command | event, notification | false |
+| command_completion_recorder | gate | command, ack | event, notification | false |
 | event_reward_accumulator | gate | event | reward, notification | false |
+| claims_scoped_catalogue_writer | gate | menu_update, auth_token | event, notification | true |
+| claims_issuing_sentinel | sentinel | auth_request | auth_token, event | false |
