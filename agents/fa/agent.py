@@ -227,6 +227,9 @@ class FAAgent:
         then BINDING for every flow iteration. Returns None if unmappable
         concepts need a slot-type decision first."""
         path = self._taxonomy_path()
+        # first run for a kata: workspace/<kata>/ doesn't exist yet
+        # (silicon's dir predated FA, so this only surfaced on kata #2)
+        path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             # STALENESS (2026-07-05): an ADR decided AFTER this taxonomy was
             # written may add binding vocabulary — reusing the old file would

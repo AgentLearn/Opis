@@ -31,3 +31,4 @@ agent generation, through the binding-ADR process.
 | event_reward_accumulator | gate | event | reward, notification | false |
 | claims_scoped_catalogue_writer | gate | menu_update, auth_token | event, notification | true |
 | claims_issuing_sentinel | sentinel | auth_request | auth_token, event | false |
+| acknowledging_command_executor | gate | command, auth_token | ack, event, notification | false |
