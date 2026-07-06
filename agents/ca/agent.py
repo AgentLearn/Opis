@@ -400,6 +400,9 @@ class CAAgent:
             main_rs = self._extract_rust(raw)
             scaffold_crate(self.build_dir, main_rs)
             (self.ca_dir / "main.rs").write_text(main_rs)  # ephemeral record
+            # per-iteration copy so persisted failure outputs point at the
+            # exact code that produced them (main.rs is overwritten each round)
+            (self.ca_dir / f"main_iter{it}.rs").write_text(main_rs)
 
             if not (caps["cargo"] and caps["wasm_target"]):
                 # a missing toolchain is an ENVIRONMENT problem, not a code
@@ -412,6 +415,11 @@ class CAAgent:
             if not ok:
                 errs = [l.strip() for l in out.splitlines() if l.strip()][-10:]
                 print(f"    dep_check FAILED ({len(errs)} line(s))")
+                for l in errs[:5]:
+                    print(f"      {l}")
+                # evidence discipline applies to failures most of all
+                # (2026-07-06): full output persisted per iteration
+                (self.ca_dir / f"depcheck_failure_iter{it}.txt").write_text(out)
                 for l in errs:
                     self._touch(history, "code", f"dep_check: {l}", run_id)
                 self._save_history(history)
@@ -424,6 +432,11 @@ class CAAgent:
                 errs = [l for l in out.splitlines()
                         if re.match(r"\s*(error|warning: unused)", l)][:30]
                 print(f"    wasm build FAILED ({len(errs)} error line(s))")
+                for l in errs[:5]:
+                    print(f"      {l}")
+                # full cargo output persisted per iteration — the console
+                # count alone made failures undiagnosable (2026-07-06)
+                (self.ca_dir / f"build_failure_iter{it}.txt").write_text(out)
                 self._touch(history, "code", errs[0] if errs else "build failed", run_id)
                 self._save_history(history)
                 errors = "cargo build --target " + WASM_TARGET + \
@@ -443,6 +456,9 @@ class CAAgent:
             fails = [l.strip() for l in out.splitlines()
                      if "FAIL" in l or "✗" in l][:20]
             print(f"    gate_harness FAILED ({len(fails)} probe(s))")
+            for l in fails[:5]:
+                print(f"      {l}")
+            (self.ca_dir / f"harness_failure_iter{it}.txt").write_text(out)
             for l in fails:
                 self._touch(history, "code", f"harness: {l}", run_id)
             self._save_history(history)
