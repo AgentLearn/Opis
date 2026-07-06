@@ -420,6 +420,7 @@ fn run_once(
     // per-gate outcome tally across runs — fire% alone is blind to a gate
     // that fires identically but DECIDES differently (tamper runs, 2026-07-06)
     outcome_counts: &mut HashMap<String, HashMap<String, u64>>,
+    tamper_sigs: bool,
 ) -> Result<HashMap<String, Option<f64>>> {
     // pulse_avail[gate_name][concrete pulse_type] = (earliest arrival, body)
     // body is Some(...) when the pulse was emitted by a substituted gate (real
@@ -434,6 +435,7 @@ fn run_once(
         body: Option<&Value>,
         lib: Option<&LatencyLib>,
         rng: &mut StdRng,
+        tamper_sigs: bool,
     ) {
         let hop = match (lib, &syn.medium) {
             (Some(l), Some(m)) => l.media.get(m).map_or(0.0, |d| d.sample(rng)),
@@ -446,7 +448,18 @@ fn run_once(
             .or_insert((f64::INFINITY, None));
         let arrival = t_send + hop;
         if arrival < entry.0 {
-            *entry = (arrival, body.cloned());
+            let mut stored = body.cloned();
+            // forge-on-the-wire: every signature crossing a synapse is
+            // corrupted — real verifiers downstream must visibly reject
+            if tamper_sigs {
+                if let Some(Value::Object(map)) = stored.as_mut() {
+                    if map.contains_key("sig") {
+                        map.insert("sig".into(),
+                                   Value::String("f0f0f0f0deadbeef".into()));
+                    }
+                }
+            }
+            *entry = (arrival, stored);
         }
     }
 
@@ -454,7 +467,7 @@ fn run_once(
     for locus in &topo.source_loci {
         if let Some(idxs) = routes_out.get(locus) {
             for &i in idxs {
-                deliver(&mut pulse_avail, &topo.synapses[i], 0.0, None, lib, rng);
+                deliver(&mut pulse_avail, &topo.synapses[i], 0.0, None, lib, rng, tamper_sigs);
             }
         }
     }
@@ -607,7 +620,7 @@ fn run_once(
                     if let Some(idxs) = routes_out.get(&gate.name) {
                         for &i in idxs {
                             if &topo.synapses[i].pulse_type == pulse_type {
-                                deliver(&mut pulse_avail, &topo.synapses[i], fire_time, body, lib, rng);
+                                deliver(&mut pulse_avail, &topo.synapses[i], fire_time, body, lib, rng, tamper_sigs);
                             }
                         }
                     }
@@ -652,7 +665,7 @@ fn run_once(
             if let Some(idxs) = routes_out.get(&gate.name) {
                 for &i in idxs {
                     if &topo.synapses[i].pulse_type == pulse_type {
-                        deliver(&mut pulse_avail, &topo.synapses[i], fire_time, None, lib, rng);
+                        deliver(&mut pulse_avail, &topo.synapses[i], fire_time, None, lib, rng, tamper_sigs);
                     }
                 }
             }
@@ -760,7 +773,7 @@ fn main() -> Result<()> {
     let mut outcome_counts: HashMap<String, HashMap<String, u64>> = HashMap::new();
 
     for run_idx in 0..cfg.runs {
-        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, &mut provider, run_idx, &mut outcome_counts)?;
+        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, &mut provider, run_idx, &mut outcome_counts, cfg.tamper_sigs)?;
         for (gate, ft) in result {
             match ft {
                 Some(t) => gate_times.entry(gate).or_default().push(t),
@@ -921,6 +934,11 @@ struct Config {
     latencies_path:     Option<PathBuf>,
     report_path:        Option<PathBuf>,
     substitutions_path: Option<PathBuf>,
+    // forge-on-the-wire (2026-07-06): corrupt every `sig` field as bodies
+    // cross synapses. Provider-side tampering can't forge against a REAL
+    // substituted sentinel chain (it signs valid tokens with the real
+    // secret in both runs) — the attacker must live on the wire.
+    tamper_sigs:        bool,
 }
 
 impl Config {
@@ -933,6 +951,7 @@ impl Config {
         let mut report_path    = None;
 
         let mut substitutions_path = None;
+        let mut tamper_sigs = false;
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
@@ -943,11 +962,12 @@ impl Config {
                 "--latencies"     => { latencies_path     = Some(PathBuf::from(&args[i + 1])); i += 2; }
                 "--report"        => { report_path        = Some(PathBuf::from(&args[i + 1])); i += 2; }
                 "--substitutions" => { substitutions_path = Some(PathBuf::from(&args[i + 1])); i += 2; }
+                "--tamper-sigs"   => { tamper_sigs        = true; i += 1; }
                 other             => anyhow::bail!("unknown argument: {other}"),
             }
         }
 
         let spec_path = spec_path.context("--spec <flow.json> is required")?;
-        Ok(Config { spec_path, runs, seed, diagnose_dir, latencies_path, report_path, substitutions_path })
+        Ok(Config { spec_path, runs, seed, diagnose_dir, latencies_path, report_path, substitutions_path, tamper_sigs })
     }
 }

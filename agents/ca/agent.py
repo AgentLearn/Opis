@@ -505,11 +505,17 @@ class CAAgent:
     # ── stage 3: co-sim + evidence ──────────────────────────────────────────
 
     def _run_twin(self, twin: str, report: Path,
-                  manifest: Path | None = None) -> tuple[bool, str]:
+                  manifest: Path | None = None,
+                  tamper_sigs: bool = False) -> tuple[bool, str]:
         cmd = [twin, "--spec", str(self.flow_path), "--runs", str(COSIM_RUNS),
                "--seed", str(COSIM_SEED), "--report", str(report)]
         if manifest:
             cmd += ["--substitutions", str(manifest)]
+        if tamper_sigs:
+            # forge on the WIRE, not at the provider: a real substituted
+            # sentinel signs valid tokens with the real secret in both runs,
+            # so provider-level tampering never forges anything (2026-07-06)
+            cmd += ["--tamper-sigs"]
         env = dict(os.environ, DA_RUN_SECRET=self.run_secret)
         r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=900)
         return r.returncode == 0, (r.stdout + r.stderr)
@@ -548,7 +554,8 @@ class CAAgent:
                 wasmtime=caps["wasmtime"] or "wasmtime", tamper_tokens=True),
                 tampered_manifest)
             tampered = self.ca_dir / "twin_tampered.json"
-            ok, out = self._run_twin(twin, tampered, tampered_manifest)
+            ok, out = self._run_twin(twin, tampered, tampered_manifest,
+                                     tamper_sigs=True)
             if ok:
                 tamp = json.loads(tampered.read_text())
                 def fires(rep):
