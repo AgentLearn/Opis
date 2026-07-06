@@ -44,10 +44,20 @@ REQUIRED_ENVELOPE = {"msg_id", "pulse_type", "ts_ms", "correlation_key",
 
 
 def parents_map(spec: dict) -> dict[str, str]:
-    """type → parent from flow archetypes merged with the base taxonomy."""
+    """type → parent from flow archetypes merged with the base taxonomy.
+
+    SELF-LOOP GUARD (2026-07-06): committed flows may declare an archetype
+    as extending ITSELF ("X extends X" = FA's idiom for "this kata term is
+    the base type", e.g. flow_v2 silicon routing_decision/payment_failed/
+    menu_update). Letting that override the base taxonomy made the extends
+    check demand schemas extend themselves — unsatisfiable; CA burned its
+    whole iteration budget against it (silicon, 2026-07-06). A self-extends
+    is a base-type reference: keep the base taxonomy's parent instead.
+    Pinned flows are immutable, so tolerance here is the only fix."""
     parents = dict(eval_mod.load_base_taxonomy())
     for name, aspec in spec.get("archetypes", {}).items():
-        if isinstance(aspec, dict) and aspec.get("extends"):
+        if isinstance(aspec, dict) and aspec.get("extends") \
+                and aspec["extends"] != name:
             parents[name] = aspec["extends"]
     return parents
 

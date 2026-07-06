@@ -263,12 +263,20 @@ class FAAgent:
                 "taxonomy under exactly that name with the decided extends; "
                 "rejected proposals must not reappear under any name.\n\n"
                 + adr_ctx)
+        retry_feedback = ""
         for attempt in (1, 2):
+            # Retry is CORRECTIVE (2026-07-06): attempt 1's defect is described
+            # back to the model — a blind identical retry reproduced the same
+            # envelope drift (terms emitted at top level, silicon v3 run).
+            msg = tax_user + retry_feedback
             response = self.client.messages.create(
                 model=GATE_MODEL,  # small structured task; flow design stays on MODEL
-                max_tokens=16000,
+                # 32000 like the flow call: 16000 was fully consumed by
+                # thinking with ZERO text emitted (silicon v3 run, 2026-07-06)
+                # — same starvation mode as the 8192 flow-call incident.
+                max_tokens=32000,
                 system=TAXONOMY_PROMPT,
-                messages=[{"role": "user", "content": tax_user}],
+                messages=[{"role": "user", "content": msg}],
             )
             raw = self._response_text(response)
             try:
@@ -282,12 +290,24 @@ class FAAgent:
                 fail_path.parent.mkdir(parents=True, exist_ok=True)
                 fail_path.write_text(f"stop_reason: {stop}\n\n{raw}")
                 print(f"    raw response saved: {fail_path.name}")
+                retry_feedback = (
+                    "\n\n## RETRY — your previous response was unusable\n"
+                    "It did not contain parseable JSON. Respond with ONE JSON "
+                    "object only, top-level keys exactly: terms, loci, "
+                    "unmappable. No prose before or after.")
                 continue
             if isinstance(cand.get("terms"), dict) and cand["terms"]:
                 tax = cand
                 break
             print(f"  taxonomy: response has no non-empty 'terms' dict "
                   f"(attempt {attempt}/2) — keys: {sorted(cand)[:8]}")
+            retry_feedback = (
+                "\n\n## RETRY — your previous response had the wrong envelope\n"
+                f"Its top-level keys were {sorted(cand)[:8]} — it looks like "
+                "you emitted the term entries at top level. Wrap them: ONE "
+                "JSON object with top-level keys exactly 'terms' (dict of "
+                "term-name -> {extends, kata_phrase, description}), 'loci', "
+                "and 'unmappable'. No prose.")
         if tax is None:
             raise RuntimeError(
                 "taxonomy generation failed twice — no usable 'terms' in the "
