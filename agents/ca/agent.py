@@ -119,9 +119,11 @@ class CAAgent:
             print(f"  model verified: {served}")
         CAAgent._model_verified = True
 
-    def _llm(self, system: str, user: str, max_tokens: int = 32000) -> str:
+    def _llm(self, system: str, user: str, max_tokens: int = 64000) -> str:
         # Streaming mandatory at this budget; thinking + a full Rust file
-        # must both fit (8192 starved FA's text entirely — same trap here).
+        # must both fit (8192 starved FA's text entirely — same trap here;
+        # 32000 truncated codegen mid-expression when thinking ran long,
+        # 2026-07-06 — a full multi-template main.rs is ~30KB of text ALONE).
         with self.client.messages.stream(
             model=MODEL, max_tokens=max_tokens, system=system,
             messages=[{"role": "user", "content": user}],
@@ -133,6 +135,11 @@ class CAAgent:
             kinds = [getattr(b, "type", "?") for b in response.content]
             print(f"  !! empty text from model — stop_reason="
                   f"{response.stop_reason}, blocks={kinds}")
+        elif response.stop_reason == "max_tokens":
+            # loud tree: a truncated file WILL fail the compiler with a
+            # misleading "unclosed delimiter" — name the real cause here
+            print(f"  !! response TRUNCATED at max_tokens={max_tokens} "
+                  f"({len(text)} chars of text) — output incomplete")
         return text
 
     def _extract_json(self, text: str) -> dict:
@@ -421,6 +428,9 @@ class CAAgent:
             print(f"  codegen: iteration {it}/{MAX_CODE_ITERATIONS}...")
             raw = self._llm(GATE_CODEGEN_PROMPT, build_codegen_user_prompt(
                 flow_json, schemas_json, contracts, errors))
+            # raw persisted BEFORE extraction — when extraction/compile goes
+            # wrong, the model's actual output is the primary evidence
+            (self.ca_dir / f"response_codegen_iter{it}.txt").write_text(raw)
             main_rs = self._extract_rust(raw)
             scaffold_crate(self.build_dir, main_rs)
             (self.ca_dir / "main.rs").write_text(main_rs)  # ephemeral record
