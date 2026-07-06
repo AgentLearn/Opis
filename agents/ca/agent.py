@@ -389,6 +389,30 @@ class CAAgent:
     def stage_code(self, schemas: dict, contracts: str, caps: dict,
                    history: dict, run_id: str) -> Path | None:
         """Returns the harness-passing manifest path, or None."""
+        # PRE-CODE FALSIFICATION CHECK (2026-07-06, silent-rejection class):
+        # an auth-verifying instance whose declared outcomes offer no
+        # rejection channel CANNOT reject visibly — generated code is forced
+        # into success-named-outcome-with-empty-outputs (flow_v3 MenuWriter:
+        # HMAC verified correctly, forgery invisible to every observer).
+        # This is a flow/contract translation defect; refuse before codegen.
+        silent = []
+        for name, g in self.spec.get("gates", {}).items():
+            if not g.get("auth_required"):
+                continue
+            if len(g.get("emits", [])) < 2:
+                only = [e.get("outcome") for e in g.get("emits", [])]
+                silent.append(f"{name} (outcomes: {only})")
+        if silent:
+            for s in silent:
+                print(f"    ✗ auth-verifying instance has NO rejection outcome "
+                      f"— rejection would be silent: {s}")
+                self._touch(history, "code",
+                            f"silent-rejection: {s}", run_id)
+            self._save_history(history)
+            print("    codegen REFUSED — the flow must wire a rejection "
+                  "outcome for every auth-verifying instance (contract "
+                  "already demands one); FA-level fix, not codegen's")
+            return None
         flow_json = json.dumps(self.spec, indent=1)
         schemas_json = json.dumps(schemas, indent=1)
         manifest_path = self.ca_dir / "manifest.json"
@@ -505,6 +529,7 @@ class CAAgent:
         auth_gates = [n for n, g in self.spec.get("gates", {}).items()
                       if g.get("auth_required")]
         tamper_delta = None
+        outcome_delta = None
         if auth_gates:
             print("  co-sim: negative-path run (tampered tokens)...")
             tampered_manifest = self.ca_dir / "manifest_tampered.json"
@@ -519,12 +544,44 @@ class CAAgent:
                 def fires(rep):
                     return {n: g.get("fire_pct", 0.0)
                             for n, g in rep.get("gates", {}).items()}
+                def outcomes(rep):
+                    return {n: g.get("outcomes", {})
+                            for n, g in rep.get("gates", {}).items()}
                 fr, ft = fires(real), fires(tamp)
                 tamper_delta = sum(abs(fr.get(n, 0) - ft.get(n, 0)) for n in fr)
-                if tamper_delta == 0:
-                    failures.append(
-                        "tampered tokens changed NOTHING (sum |Δfire%| = 0) — "
-                        "authZ verification is not actually enforced")
+                # OUTCOME diff, not just fire%: a verifying gate may fire
+                # identically but DECIDE differently (silent-rejection class,
+                # 2026-07-06 — MenuWriter verified HMAC yet Δfire%=0). Needs
+                # a twin that reports per-gate outcome tallies.
+                oreal, otamp = outcomes(real), outcomes(tamp)
+                outcome_delta = sum(
+                    abs(oreal.get(n, {}).get(o, 0) - otamp.get(n, {}).get(o, 0))
+                    for n in set(oreal) | set(otamp)
+                    for o in set(oreal.get(n, {})) | set(otamp.get(n, {})))
+                have_outcomes = any(oreal.values()) or any(otamp.values())
+                # DEGENERATE-BASELINE GUARD: if the co-sim itself is half dead,
+                # "tampering changed nothing" is expected and proves nothing.
+                degenerate = bool(dead)
+                if tamper_delta == 0 and outcome_delta == 0:
+                    if degenerate:
+                        failures.append(
+                            "tamper check INCONCLUSIVE: no behavior change, but "
+                            f"the co-sim baseline is degenerate ({len(dead)} dead "
+                            "gate(s)) — fix the flow first, then re-judge authZ")
+                    elif not have_outcomes:
+                        failures.append(
+                            "tamper check INCONCLUSIVE: Δfire%=0 and the twin "
+                            "report carries no outcome tallies — rebuild da-twin "
+                            "(outcome counts added 2026-07-06) and re-run")
+                    else:
+                        failures.append(
+                            "tampered tokens changed NOTHING (fire% and outcome "
+                            "tallies identical) — authZ verification is not "
+                            "actually enforced")
+                elif tamper_delta == 0 and outcome_delta > 0:
+                    print(f"    tamper check: fire% unchanged but outcomes shifted "
+                          f"(Σ|Δoutcome|={outcome_delta}) — authZ enforced, "
+                          f"rejection visible only in decisions")
             else:
                 failures.append(f"tampered-token twin run failed: {out[-200:]}")
 
@@ -534,6 +591,7 @@ class CAAgent:
             "gates": real.get("gates", {}),
             "baseline_gates": base.get("gates", {}),
             "tamper_fire_delta_sum": tamper_delta,
+            "tamper_outcome_delta_sum": outcome_delta,
             "failures": failures,
             "note": "sandbox measurements — feasibility verdict + lower bounds only",
         }

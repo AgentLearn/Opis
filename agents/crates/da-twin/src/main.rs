@@ -417,6 +417,9 @@ fn run_once(
     subs: &mut Option<substitute::SubPool>,   // co-sim: real gate implementations
     provider: &mut Option<substitute::BodyProvider>, // CA payload generator
     run_idx: usize,
+    // per-gate outcome tally across runs — fire% alone is blind to a gate
+    // that fires identically but DECIDES differently (tamper runs, 2026-07-06)
+    outcome_counts: &mut HashMap<String, HashMap<String, u64>>,
 ) -> Result<HashMap<String, Option<f64>>> {
     // pulse_avail[gate_name][concrete pulse_type] = (earliest arrival, body)
     // body is Some(...) when the pulse was emitted by a substituted gate (real
@@ -578,6 +581,11 @@ fn run_once(
                             gate.outcomes.iter().filter_map(|o| o.name.as_deref()).collect::<Vec<_>>()
                         )
                     })?;
+                *outcome_counts
+                    .entry(gate.name.clone())
+                    .or_default()
+                    .entry(outcome_name.to_string())
+                    .or_insert(0) += 1;
                 // Contract check: actual outputs ⊆ the chosen outcome's declared flows
                 for out in &resp.outputs {
                     if !chosen.flows.iter().any(|f| f == &out.pulse_type) {
@@ -633,6 +641,11 @@ fn run_once(
             cum += o.weight;
             r < cum
         }).unwrap_or(&gate.outcomes[gate.outcomes.len() - 1]);
+        *outcome_counts
+            .entry(gate.name.clone())
+            .or_default()
+            .entry(chosen.name.clone().unwrap_or_else(|| "_unnamed".into()))
+            .or_insert(0) += 1;
 
         // Propagate emitted pulses downstream (with per-synapse medium latency)
         for pulse_type in &chosen.flows {
@@ -744,9 +757,10 @@ fn main() -> Result<()> {
     // Accumulate per-gate fire times across all runs
     let mut gate_times: HashMap<String, Vec<f64>> = HashMap::new();
     let mut gate_miss:  HashMap<String, usize>    = HashMap::new();
+    let mut outcome_counts: HashMap<String, HashMap<String, u64>> = HashMap::new();
 
     for run_idx in 0..cfg.runs {
-        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, &mut provider, run_idx)?;
+        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, &mut provider, run_idx, &mut outcome_counts)?;
         for (gate, ft) in result {
             match ft {
                 Some(t) => gate_times.entry(gate).or_default().push(t),
@@ -840,6 +854,14 @@ fn main() -> Result<()> {
         let gates_json: serde_json::Map<String, Value> = rows
             .iter()
             .map(|r| {
+                let outcomes: serde_json::Map<String, Value> = outcome_counts
+                    .get(&r.name)
+                    .map(|m| {
+                        m.iter()
+                            .map(|(k, v)| (k.clone(), json!(v)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 (r.name.clone(), json!({
                     "fire_pct": r.fire_pct,
                     "p50_ms": r.p50,
@@ -847,6 +869,9 @@ fn main() -> Result<()> {
                     "p99_ms": r.p99,
                     "mean_ms": r.mean,
                     "service_source": service_source_str(r.service),
+                    // what the gate DECIDED, not just whether it fired —
+                    // tamper comparisons diff these (2026-07-06)
+                    "outcomes": Value::Object(outcomes),
                 }))
             })
             .collect();

@@ -138,6 +138,10 @@ contract's refusal/timeout outcome if one exists, else the least-harmful outcome
 outputs if nothing can be emitted legally).
 - all domain time checks (token expiry, windows) use the request's virtual t_ms — never \
 wall clock.
+- NO SILENT REJECTION: a verification/validation failure must NEVER be expressed as a \
+success-named outcome with empty outputs — that hides the refusal from every observer. \
+Use the instance's rejection/refusal outcome. (Instances lacking one are refused before \
+codegen ever runs — you will not see them.)
 
 ## Decision logic — from the contracts, not invented
 

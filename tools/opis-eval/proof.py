@@ -316,11 +316,20 @@ def find_requirement_proof(
             continue
         path = reconstruct_path(pred, gate_name, satisfied_type)
         result["proofs"][t] = path
-        if path and path[0].get("fired") == "fallback":
-            result["notes"].append(
-                f"'{t}' only resolves via a conservative cyclic fallback at "
-                f"'{path[0]['node']}' — two gates depend on each other; not a "
-                f"clean external trace"
+        # BOOTSTRAP DEADLOCK = DISPROOF (Zarko, 2026-07-06, after the twin
+        # caught flow_v3's routing cycle dead at 0%): a force-fired gate is
+        # one the fixed point could NOT fire — in monotonic pulse semantics
+        # a genuinely stuck requires-cycle can never fire dynamically, so
+        # "proved via fallback" was the wrong polarity. Any fallback hop
+        # anywhere in a witness path is now a blocking issue, not a note.
+        fb = [h for h in path if h.get("fired") == "fallback"]
+        if fb:
+            all_satisfied = False
+            result["issues"].append(
+                f"bootstrap deadlock: '{t}' resolves only by force-firing "
+                f"'{fb[0]['node']}' inside a requires-cycle — dynamically that "
+                f"gate can never fire (nobody can go first). Redesign the "
+                f"cycle: seed it externally or split the fan-out from the join."
             )
 
     if all_satisfied and not result["issues"]:
