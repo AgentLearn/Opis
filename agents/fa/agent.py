@@ -269,15 +269,18 @@ class FAAgent:
             # back to the model — a blind identical retry reproduced the same
             # envelope drift (terms emitted at top level, silicon v3 run).
             msg = tax_user + retry_feedback
-            response = self.client.messages.create(
+            # 32000 like the flow call: 16000 was fully consumed by thinking
+            # with ZERO text emitted (silicon v3 run, 2026-07-06) — same
+            # starvation mode as the 8192 flow-call incident. Streaming is
+            # mandatory at this budget (SDK refuses non-streaming calls that
+            # could exceed 10 minutes).
+            with self.client.messages.stream(
                 model=GATE_MODEL,  # small structured task; flow design stays on MODEL
-                # 32000 like the flow call: 16000 was fully consumed by
-                # thinking with ZERO text emitted (silicon v3 run, 2026-07-06)
-                # — same starvation mode as the 8192 flow-call incident.
                 max_tokens=32000,
                 system=TAXONOMY_PROMPT,
                 messages=[{"role": "user", "content": msg}],
-            )
+            ) as stream:
+                response = stream.get_final_message()
             raw = self._response_text(response)
             try:
                 cand = self._extract_json(raw)
