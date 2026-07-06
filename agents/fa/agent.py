@@ -623,7 +623,9 @@ class FAAgent:
         flow_path.parent.mkdir(parents=True, exist_ok=True)
         spec["version"] = self.version
         pins_mod = self._pins_module()
-        pins, pin_errors = pins_mod.compute_pins(spec, AGENT_DIR / "gates")
+        # kata pin (2026-07-06): the ask's content hash rides on the artifact
+        pins, pin_errors = pins_mod.compute_pins(spec, AGENT_DIR / "gates",
+                                                 kata=self.kata_path)
         if pin_errors:
             # a used template with no contract file should have been caught by
             # conformance long before commit — treat as a hard bug, not a skip

@@ -96,10 +96,18 @@ def flow_templates(flow: dict) -> set[str]:
 # ── compute ───────────────────────────────────────────────────────────────────
 
 def compute_pins(flow: dict, gates_dir: Path = DEFAULT_GATES_DIR,
-                 slot_types: Path = DEFAULT_SLOT_TYPES) -> tuple[dict, list[str]]:
+                 slot_types: Path = DEFAULT_SLOT_TYPES,
+                 kata: Path | None = None) -> tuple[dict, list[str]]:
     """Pin block for a flow from current on-disk state. Returns (pins, errors);
     errors are templates the flow uses but no contract file covers — a flow
-    with compute errors must NOT be committed."""
+    with compute errors must NOT be committed.
+
+    KATA PIN (Zarko, 2026-07-06): the kata is the flow's source of truth,
+    so its content hash is attached to the artifact. Katas have no archive
+    (git holds history) and no frontmatter version — the pin is hash + the
+    repo-relative file, and verification is ADVISORY: a moved kata means
+    "the latest proof may no longer answer the current ask", never that an
+    old artifact became invalid (old pins valid forever)."""
     errors: list[str] = []
     gates: dict[str, dict] = {}
     for t in sorted(flow_templates(flow)):
@@ -116,7 +124,17 @@ def compute_pins(flow: dict, gates_dir: Path = DEFAULT_GATES_DIR,
     else:
         taxonomy = {"version": frontmatter_version(slot_types),
                     "hash": file_hash(slot_types)}
-    return {"gates": gates, "taxonomy": taxonomy}, errors
+    pins = {"gates": gates, "taxonomy": taxonomy}
+    if kata is not None:
+        if not kata.exists():
+            errors.append(f"pin compute: kata file missing ({kata})")
+        else:
+            try:
+                rel = str(kata.resolve().relative_to(REPO_ROOT))
+            except ValueError:
+                rel = str(kata)
+            pins["kata"] = {"file": rel, "hash": file_hash(kata)}
+    return pins, errors
 
 
 # ── verify ────────────────────────────────────────────────────────────────────
@@ -174,6 +192,22 @@ def verify_pins(flow: dict, gates_dir: Path = DEFAULT_GATES_DIR,
                 f"pinned v{pin.get('version')}, frontmatter says "
                 f"v{actual_version}")
 
+    kata_pin = pins.get("kata")
+    if not kata_pin:
+        warnings.append("no kata pin (flow predates kata pinning) — "
+                        "re-prove to attach the kata hash")
+    else:
+        kata_file = REPO_ROOT / kata_pin.get("file", "")
+        if not kata_file.exists():
+            warnings.append(
+                f"pinned kata file missing/renamed ({kata_pin.get('file')}) — "
+                f"the artifact's ask can't be located; advisory only")
+        elif file_hash(kata_file) != kata_pin.get("hash"):
+            warnings.append(
+                f"kata has MOVED since this flow was proved "
+                f"({kata_pin.get('file')}) — the latest proof may no longer "
+                f"answer the current ask; re-run FA to re-prove")
+
     tax_pin = pins.get("taxonomy")
     if not tax_pin:
         errors.append("pins block has no taxonomy pin")
@@ -205,12 +239,15 @@ def main() -> int:
     ap.add_argument("--write", action="store_true",
                     help="compute pins from current disk state and insert "
                          "into the flow file")
+    ap.add_argument("--kata", type=Path, default=None,
+                    help="kata file to pin (hash attached to the artifact)")
     args = ap.parse_args()
 
     flow = json.loads(args.flow.read_text())
 
     if args.write:
-        pins, errs = compute_pins(flow, args.gates_dir, args.slot_types)
+        pins, errs = compute_pins(flow, args.gates_dir, args.slot_types,
+                                  kata=args.kata)
         if errs:
             for e in errs:
                 print(f"  ERROR  {e}")
