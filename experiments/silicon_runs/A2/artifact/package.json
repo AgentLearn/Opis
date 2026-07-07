@@ -1,0 +1,19 @@
+{
+  "name": "silicon-sandwiches",
+  "version": "1.0.0",
+  "description": "Silicon Sandwiches franchise order flow — payment-gated kitchen submission, queue-based pickup estimates, multi-provider delivery routing, driver tracking, per-franchise menus, and loyalty rewards.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "demo": "node src/demo.ts",
+    "test": "node --test 'test/*.test.ts'",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^5.7.0"
+  }
+}

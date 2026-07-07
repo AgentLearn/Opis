@@ -1,0 +1,19 @@
+{
+  "name": "silicon-sandwiches",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Silicon Sandwiches order flow: payment-gated kitchen submission, traffic-aware routing, driver tracking, franchise menus, loyalty.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "demo": "node src/demo.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "silicon-sandwiches",
+  "version": "1.0.0",
+  "description": "Silicon Sandwiches order flow — checkout, routing, kitchen, dispatch, loyalty",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "demo": "node src/demo.ts",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^5.7.0"
+  }
+}
