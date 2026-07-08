@@ -30,3 +30,4 @@ compose.yaml
 # Architect's private strategy notes — local only, never pushed
 strategy.md
 store.cypher
+todo/
