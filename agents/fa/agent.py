@@ -44,6 +44,10 @@ class FAAgent:
             http_client=httpx.Client(verify=False, proxy=proxy)
         )
         self.version = self._next_version()
+        # One run id for the whole invocation — the log dir and every spend
+        # ledger line share it (2026-07-11, REQ-20: token spend was
+        # persisted NOWHERE — the env gap CA falsified on workbench v2).
+        self._run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     # ── setup ──────────────────────────────────────────────────────────────
 
@@ -82,8 +86,34 @@ class FAAgent:
         return self.output_dir / "adrs"
 
     def _log_dir(self) -> Path:
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        return self.output_dir / "logs" / "fa" / ts
+        return self.output_dir / "logs" / "fa" / self._run_id
+
+    def _record_spend(self, stage: str, response, iteration: int | None = None) -> None:
+        """Append one line per LLM call to the kata's append-only spend
+        ledger (workspace/<kata>/spend_ledger.jsonl). Environment fact this
+        creates: agents DO persist spend, per call, durably — the artifact
+        a flow's iteration-facts resolver polls. Best-effort and loud-on-
+        fail: a ledger miss never kills a run, but is never silent."""
+        try:
+            u = getattr(response, "usage", None)
+            line = json.dumps({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "agent": "fa",
+                "run_id": self._run_id,
+                "kata": self.kata_name,
+                "stage": stage,
+                "iteration": iteration,
+                "model": getattr(response, "model", None),
+                "input_tokens": getattr(u, "input_tokens", None),
+                "output_tokens": getattr(u, "output_tokens", None),
+                "stop_reason": getattr(response, "stop_reason", None),
+            })
+            path = self.output_dir / "spend_ledger.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a") as fh:
+                fh.write(line + "\n")
+        except Exception as e:  # noqa: BLE001 — ledger must not fail a run
+            print(f"  ⚠ spend ledger write failed (run continues): {e}")
 
     def _workspace_commit(self, message: str) -> None:
         """Commit this run's results into the LOCAL workspace repo
@@ -240,10 +270,19 @@ class FAAgent:
                 default=0.0)
             if path.stat().st_mtime >= newest_marker:
                 tax = json.loads(path.read_text())
-                print(f"  taxonomy: reusing {path.name} ({len(tax.get('terms', {}))} term(s))")
-                return tax
-            print(f"  taxonomy: {path.name} is older than the newest decided "
-                  f"ADR — regenerating with decisions in context")
+                # A BLOCKED taxonomy (non-empty unmappable) must never be
+                # reused (2026-07-11, workbench v2 run): reusing it would
+                # re-block forever — or slip past the unmappable check, which
+                # only guards the generation path. Regenerate instead.
+                if tax.get("unmappable"):
+                    print(f"  taxonomy: {path.name} is BLOCKED (unmappable "
+                          f"concepts) — regenerating")
+                else:
+                    print(f"  taxonomy: reusing {path.name} ({len(tax.get('terms', {}))} term(s))")
+                    return tax
+            else:
+                print(f"  taxonomy: {path.name} is older than the newest decided "
+                      f"ADR — regenerating with decisions in context")
 
         print("  taxonomy: deriving domain glossary (stage 1)...")
         # Shape-guarded with one retry: a response without a non-empty 'terms'
@@ -272,18 +311,19 @@ class FAAgent:
             # back to the model — a blind identical retry reproduced the same
             # envelope drift (terms emitted at top level, silicon v3 run).
             msg = tax_user + retry_feedback
-            # 32000 like the flow call: 16000 was fully consumed by thinking
-            # with ZERO text emitted (silicon v3 run, 2026-07-06) — same
-            # starvation mode as the 8192 flow-call incident. Streaming is
-            # mandatory at this budget (SDK refuses non-streaming calls that
-            # could exceed 10 minutes).
+            # 64000 (2026-07-11): 32000 was AGAIN fully consumed by thinking
+            # with ZERO text (workbench v3 run) — 16000 starved the same way
+            # on silicon v3 (2026-07-06). Matches the codegen call's 64k fix.
+            # Streaming is mandatory at this budget (SDK refuses
+            # non-streaming calls that could exceed 10 minutes).
             with self.client.messages.stream(
                 model=GATE_MODEL,  # small structured task; flow design stays on MODEL
-                max_tokens=32000,
+                max_tokens=64000,
                 system=TAXONOMY_PROMPT,
                 messages=[{"role": "user", "content": msg}],
             ) as stream:
                 response = stream.get_final_message()
+            self._record_spend("taxonomy", response, iteration=attempt)
             raw = self._response_text(response)
             try:
                 cand = self._extract_json(raw)
@@ -412,6 +452,8 @@ class FAAgent:
             messages=[{"role": "user", "content": user_prompt}],
         ) as stream:
             response = stream.get_final_message()
+        self._record_spend("flow", response,
+                           iteration=getattr(self, "_current_iteration", None))
         self._verify_served_model(response)
         text = self._response_text(response)
         if not text.strip():
@@ -711,6 +753,7 @@ class FAAgent:
             messages=[{"role": "user", "content":
                 f"## Slot Types\n{slot_types}\n\n## Approved ADR\n{adr_content}"}],
         )
+        self._record_spend("gate_generation", response)
         return self._response_text(response).strip()
 
     def _generate_amended_gate_file(self, existing_md: str, adr_content: str) -> str:
@@ -724,6 +767,7 @@ class FAAgent:
                 f"## Slot Types\n{slot_types}\n\n## Current Gate File\n{existing_md}"
                 f"\n\n## Approved ADR (apply its Decision)\n{adr_content}"}],
         )
+        self._record_spend("gate_amendment", response)
         return self._response_text(response).strip()
 
     def _lint_contract(self, gate_file: Path) -> None:
@@ -1104,6 +1148,7 @@ class FAAgent:
         adr_index = self._next_adr_index()
 
         for iteration in range(1, MAX_ITERATIONS + 1):
+            self._current_iteration = iteration  # spend-ledger provenance
             print(f"  iteration {iteration}/{MAX_ITERATIONS}...")
             log.append(f"\n--- iteration {iteration} ---")
 

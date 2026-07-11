@@ -97,8 +97,13 @@ All Python tools run from repo root with Python 3, stdlib only.
 - An FA "run" ends at ADR proposals; continuation after decisions is a
   new invocation. The loop across invocations is held together entirely
   by workspace state (markers, decided ADRs, defect history).
-- Token spend is visible only inside the agent process (per-response API
-  usage); nothing persists it today.
+- Token spend IS persisted (2026-07-11): both agents append one line per
+  LLM call to `workspace/<kata>/spend_ledger.jsonl` — shape
+  `{ts, agent: fa|ca, run_id, kata, stage, iteration, model,
+  input_tokens, output_tokens, stop_reason}`. `run_id` matches the FA log
+  dir name. Append-only, best-effort (a failed write warns, never kills a
+  run). Live spend = poll this file; defects/retries live separately in
+  `fa_defect_history.json` / `ca_defect_history.json`, joinable by run.
 - FA iterations take minutes each; taxonomy stage is silent while it
   runs.
 - One human, one machine: the architect's workstation runs everything;

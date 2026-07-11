@@ -145,8 +145,11 @@ workbench itself are derived from the requirements as usual.)
 - Every failure is loud: a failed verifier run, twin run, or workspace read
   is shown with its full output, never summarized to a count or a silent
   blank.
-- Long-running work (a twin run, a regression sweep) reports progress while
-  it runs and can be cancelled by the architect.
+- Long-running work (a twin run, a regression sweep) reports its status
+  while it runs — started, still running, completed, failed — and can be
+  cancelled by the architect. Measured percent-complete is not promised:
+  these runs finish in seconds and the environment emits no progress
+  stream; status must be honest, not invented.
 
 ## Nonfunctional requirements
 

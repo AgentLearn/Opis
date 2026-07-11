@@ -87,6 +87,14 @@ Rules:
   through the graph: only descriptions of it do (its order, its preparation
   command, its completion event). `source: true` marks loci that inject pulses
   from outside the system (actors, external services).
+- ARTIFACTS AT REST ARE NOT TERMS. A configuration value, a parameter, a
+  document, a version-control branch, a pin/lock block, a stored file —
+  anything that sits still — is locus state or pulse payload, never a slot
+  type. Map the kata phrase to the pulses that TOUCH the artifact: reading it
+  is a query + query_response, changing it is a command (+ ack/event), its
+  lifecycle transitions are events. `unmappable` is reserved for facts that
+  genuinely TRAVEL between loci yet fit no slot type — a noun at rest is
+  NEVER unmappable; decompose it into its interactions instead.
 """
 
 

@@ -67,9 +67,37 @@ class CAAgent:
         self.build_dir = Path(os.environ.get("CA_BUILD_DIR",
                               tempfile.gettempdir())) / f"ca-build-{kata_name}"
         self.run_secret = secrets.token_hex(16)
+        # One run id per invocation, shared by every spend-ledger line
+        # (2026-07-11, REQ-20: spend was persisted nowhere — CA falsified it).
+        self._run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
         self.client = anthropic.Anthropic(
             http_client=httpx.Client(verify=False, proxy=proxy))
+
+    def _record_spend(self, stage: str, response, iteration: int | None = None) -> None:
+        """Append one line per LLM call to the kata's append-only spend
+        ledger (workspace/<kata>/spend_ledger.jsonl) — same shape and file
+        as FA's. Best-effort, loud-on-fail, never kills a run."""
+        try:
+            u = getattr(response, "usage", None)
+            line = json.dumps({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "agent": "ca",
+                "run_id": self._run_id,
+                "kata": self.kata_name,
+                "stage": stage,
+                "iteration": iteration,
+                "model": getattr(response, "model", None),
+                "input_tokens": getattr(u, "input_tokens", None),
+                "output_tokens": getattr(u, "output_tokens", None),
+                "stop_reason": getattr(response, "stop_reason", None),
+            })
+            path = self.kata_dir / "spend_ledger.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a") as fh:
+                fh.write(line + "\n")
+        except Exception as e:  # noqa: BLE001 — ledger must not fail a run
+            print(f"  ⚠ spend ledger write failed (run continues): {e}")
 
     # ── flow resolution ────────────────────────────────────────────────────
 
@@ -119,7 +147,8 @@ class CAAgent:
             print(f"  model verified: {served}")
         CAAgent._model_verified = True
 
-    def _llm(self, system: str, user: str, max_tokens: int = 64000) -> str:
+    def _llm(self, system: str, user: str, max_tokens: int = 64000,
+             stage: str = "llm", iteration: int | None = None) -> str:
         # Streaming mandatory at this budget; thinking + a full Rust file
         # must both fit (8192 starved FA's text entirely — same trap here;
         # 32000 truncated codegen mid-expression when thinking ran long,
@@ -129,6 +158,7 @@ class CAAgent:
             messages=[{"role": "user", "content": user}],
         ) as stream:
             response = stream.get_final_message()
+        self._record_spend(stage, response, iteration=iteration)
         self._verify_served_model(response)
         text = self._response_text(response)
         if not text.strip():
@@ -323,7 +353,8 @@ class CAAgent:
         for it in range(1, MAX_SCHEMA_ITERATIONS + 1):
             print(f"  schemas: iteration {it}/{MAX_SCHEMA_ITERATIONS}...")
             raw = self._llm(SCHEMA_PROMPT, build_schema_user_prompt(
-                flow_json, contracts, slot_types, errors))
+                flow_json, contracts, slot_types, errors),
+                stage="schemas", iteration=it)
             try:
                 doc = self._extract_json(raw)
             except json.JSONDecodeError as e:
@@ -427,7 +458,8 @@ class CAAgent:
         for it in range(1, MAX_CODE_ITERATIONS + 1):
             print(f"  codegen: iteration {it}/{MAX_CODE_ITERATIONS}...")
             raw = self._llm(GATE_CODEGEN_PROMPT, build_codegen_user_prompt(
-                flow_json, schemas_json, contracts, errors))
+                flow_json, schemas_json, contracts, errors),
+                stage="codegen", iteration=it)
             # raw persisted BEFORE extraction — when extraction/compile goes
             # wrong, the model's actual output is the primary evidence
             (self.ca_dir / f"response_codegen_iter{it}.txt").write_text(raw)
