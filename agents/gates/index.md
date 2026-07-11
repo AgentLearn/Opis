@@ -22,7 +22,7 @@ agent generation, through the binding-ADR process.
 | queue_based_estimator | gate | query, location, query_response | estimate | false |
 | routing_decision_aggregator | gate | query, query_response | query, routing_decision | false |
 | routed_command_dispatcher | gate | accepted_order, routing_decision, location | command | false |
-| assignment_tracker | gate | command, location | tracking_update, notification | false |
+| assignment_tracker | gate | command, location, query_response | tracking_update, notification | false |
 | scoped_catalogue_writer | gate | menu_update, auth_token, query_response | event, notification, query | true |
 | reward_accumulator | gate | event, query | reward | false |
 | order_validator | gate | order | accepted_order, rejected_order | false |

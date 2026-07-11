@@ -444,10 +444,13 @@ class FAAgent:
         # Streaming is mandatory at this budget (SDK refuses non-streaming
         # calls that could exceed 10 minutes). Fable-class models think by
         # default; the budget must fit thinking + a full flow spec — 8192
-        # starved the text entirely (thinking ate it all → empty response).
+        # starved the text entirely (thinking ate it all → empty response);
+        # 32000 truncated two consecutive v3 iterations at exactly the cap
+        # once the 75-term taxonomy grew the spec (2026-07-11, ledger showed
+        # 32000out/max_tokens twice — run killed). 64k matches taxonomy/codegen.
         with self.client.messages.stream(
             model=MODEL,
-            max_tokens=32000,
+            max_tokens=64000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
         ) as stream:
