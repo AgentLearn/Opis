@@ -1,7 +1,23 @@
 # Opis Workbench — Architect's Console
 
+## Changes
+
+- **v3 (2026-07-12)** — second actor added (domain expert, with a face of
+  their own); actions/faces boundary made a stated fact of the world
+  (Definitions: face, action, domain expert; four new requirements); "one
+  user" nonfunctional clarified to one person / two roles. Per the
+  2026-07-12 strategy decisions: the shared actions catalog is to be
+  DERIVED by FA as shared gate contracts, not hand-designed; transports
+  (HTTP, CLI, MCP) stay out of the flow — environment-doc mechanics.
+- **v2 (2026-07-08, committed 07-11)** — parameter panel
+  (declared/measured), what-if branches + merge-as-approval, run control,
+  Definitions section, status-only progress, ADR-004 enrichment slot.
+- **v1** — original kata. Git holds the history; pins hold the hashes.
+
 Opis Workbench is the control panel a software architect uses to inspect,
-verify, and steer Opis's own agents. The architect works in a browser. The
+verify, and steer Opis's own agents. A second person, the domain expert,
+operates the same system through a face of their own. Both work in a
+browser. The
 system's world contains the workspace repository (flows, ADRs, evidence,
 falsification reports, defect histories — written concurrently by the FA
 and CA agents), the gate library with its pinned contract versions, the
@@ -73,6 +89,18 @@ workbench itself are derived from the requirements as usual.)
   happen on branches; approval merges a branch to the main line; the main
   line is append-only and never rewritten.
 - **Kata** — a problem statement, like this document.
+- **Face** — a client surface through which a person or agent operates
+  the system: the architect's console, the domain expert's view, the
+  command line, an agent connection. A face renders the same recorded
+  facts in its audience's vocabulary; it holds no state and decides
+  nothing of its own.
+- **Action** — one named operation on the system's world, a query or a
+  command. The catalog of actions is shared by all faces and is the only
+  channel any face uses. In flow terms: face loci route facts into
+  shared gates; those gates' contracts define the catalog.
+- **Domain expert** — the second actor: a person who knows the business
+  domain being architected but reads neither graphs nor engineer
+  vocabulary (ADR, gate, kata).
 
 ## Requirements
 
@@ -142,6 +170,22 @@ workbench itself are derived from the requirements as usual.)
 - A run that ends well concludes with committed work on its branch; the
   architect approves by merging to the main line. A stopped or abandoned
   run leaves the main line untouched.
+- A second actor, the domain expert, operates through their own face:
+  pending decisions appear as plain questions with genuine options and
+  each option's consequence shown by running it; ad-hoc scenarios are
+  authored and run in story terms; running work reports status. The
+  graph, and the words ADR, gate, and kata, never appear on this face.
+- Every face — architect's console, domain expert's face, command
+  line — reaches the workspace through the same shared actions; an
+  operation offered on two faces travels one path. A face needing an
+  operation the catalog lacks means a missing action, never logic built
+  into the face.
+- When the domain expert decides a question, the decision is recorded
+  as the same full ADR through the same single decision-recording path;
+  the record does not know which face produced it.
+- The domain expert's face fails as loudly as the architect's: a failed
+  run or read shows what happened in plain language, never a silent
+  blank or an invented reassurance.
 - Every failure is loud: a failed verifier run, twin run, or workspace read
   is shown with its full output, never summarized to a count or a silent
   blank.
@@ -157,8 +201,10 @@ workbench itself are derived from the requirements as usual.)
   workspace repository, the verifier executables, the twin, and the agents'
   concurrent output. A server-side deployment is expected; the browser is
   only the rendering surface and holds no authority.
-- One user. Version 1 serves a single architect on their own machine
-  against their own workspace — no accounts, no sessions, no concurrent
-  editors. If that ever changes, the change arrives as a new kata
-  requirement and the flow is re-proved and re-implemented for it; nothing
-  in v1 should pre-build for the multi-user case.
+- One person at a time. Version 1 serves a single person on their own
+  machine against their own workspace — no accounts, no sessions, no
+  concurrent editors. Architect and domain expert are ROLES (faces), not
+  users: the same person may wear either hat. If concurrent people ever
+  arrive, that change is a new kata requirement and the flow is re-proved
+  and re-implemented for it; nothing in v1 should pre-build for the
+  multi-user case.
