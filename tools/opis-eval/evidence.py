@@ -36,6 +36,7 @@ Usage:
   python tools/opis-eval/evidence.py <flow_vN.json>
       [--gates-dir D] [--slot-types F] [--latencies F]
       [--twin-report F] [--cosim-report F] [--out F] [--no-md]
+      [--environment NAME] [--env-hash sha256:...]
 
 Exit codes: 0 report written / 1 could not build report.
 """
@@ -43,6 +44,7 @@ Exit codes: 0 report written / 1 could not build report.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -56,6 +58,7 @@ REPO_ROOT = HERE.parents[1]
 DEFAULT_GATES_DIR = REPO_ROOT / "agents" / "gates"
 DEFAULT_SLOT_TYPES = REPO_ROOT / "agents" / "slot_types" / "index.md"
 DEFAULT_LATENCIES = REPO_ROOT / "agents" / "latencies" / "latencies.json"
+ENVS_DIR = REPO_ROOT / "agents" / "environments"
 
 SCHEMA_VERSION = 1
 
@@ -233,6 +236,32 @@ def cosim_claims(cosim_report: dict) -> list[dict]:
         claims.append(claim(f"{gname} measured under co-sim", "bounded",
                             {**stats, "note": "sandbox lower bound only"},
                             "cosim", gate=gname))
+
+    # ── ADR-005: sourced pass — gates fed by RECORDED REAL EXECUTIONS.
+    # Scope `sourced` marks claims bought by an implementation run (N=1
+    # tape); verdict stays bounded — real facts, sandbox bounds.
+    s = cosim_report.get("sourced")
+    if s:
+        tape = s.get("tape") or {}
+        claims.append(claim(
+            f"{len(s.get('gates', []))} gate(s) replayed recorded real "
+            f"executions ({s.get('runs')} runs)", "bounded",
+            {"gates": s.get("gates"), "tape": tape}, "sourced"))
+        envpin = tape.get("environment") or {}
+        doc = REPO_ROOT / envpin.get("file", "")
+        if envpin.get("hash") and doc.exists():
+            now = "sha256:" + hashlib.sha256(doc.read_bytes()).hexdigest()
+            if now != envpin["hash"]:
+                claims.append(claim(
+                    "tape current vs environment document", "flagged",
+                    f"tape cut against {envpin['hash']}, env doc now {now} "
+                    f"— a stale tape is a quiet lie; re-record", "sourced"))
+        for g in s.get("gates", []):
+            claims.append(claim(
+                f"{g} fed by recorded real execution", "bounded",
+                {"tape": tape.get("file"),
+                 "recorded_utc": tape.get("recorded_utc")},
+                "sourced", gate=g))
     return claims
 
 
@@ -281,14 +310,49 @@ def verdict_block(spec: dict, all_claims: list[dict]) -> dict:
             "caveats": caveats}
 
 
+# ── environment-doc pin (2026-07-06 decision: env hash-pinned into EVIDENCE,
+#    never into the flow pin block — flows stay infra-blind; a translation is
+#    keyed flow_vN × env_vM and each keying pins separately) ───────────────────
+
+def environment_doc_pin(env_name: str, env_hash: str | None) -> tuple[dict, dict]:
+    """Returns (provenance block, claim). Verification is ADVISORY, kata-pin
+    style: a doc that moved mid-run flags the evidence, never voids it."""
+    path = ENVS_DIR / f"{env_name}.md"
+    file_rel = str(path.relative_to(REPO_ROOT))
+    if not path.exists():
+        return ({"name": env_name, "file": file_rel, "hash": env_hash,
+                 "note": "document missing at evidence time"},
+                claim("translation pinned to environment document", "flagged",
+                      f"environment doc {file_rel} MISSING at evidence time "
+                      f"(run-start hash: {env_hash})", "static"))
+    now_hash = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    pin = {"name": env_name, "file": file_rel, "hash": env_hash or now_hash}
+    if env_hash and env_hash != now_hash:
+        return (pin, claim(
+            "translation pinned to environment document", "flagged",
+            f"environment doc {file_rel} MOVED during the run — translation "
+            f"read {env_hash}, on disk now {now_hash}; re-run CA against the "
+            f"current document", "static"))
+    return (pin, claim(
+        "translation pinned to environment document", "passed",
+        f"environment doc {file_rel} {pin['hash']} (verified on disk)",
+        "static"))
+
+
 # ── report assembly ───────────────────────────────────────────────────────────
 
 def build_report(flow_path: Path, gates_dir: Path, slot_types: Path,
                  latencies: Path, twin_report: dict | None,
-                 cosim_report: dict | None, kata: str | None) -> dict:
+                 cosim_report: dict | None, kata: str | None,
+                 env_name: str | None = None,
+                 env_hash: str | None = None) -> dict:
     spec = eval_mod.load_spec(flow_path)
 
     claims, _proof_raw = static_claims(flow_path, spec, gates_dir, slot_types)
+    env_pin = None
+    if env_name:
+        env_pin, env_claim = environment_doc_pin(env_name, env_hash)
+        claims.append(env_claim)
     if twin_report:
         claims += twin_claims(spec, twin_report, latencies)
     if cosim_report:
@@ -300,8 +364,12 @@ def build_report(flow_path: Path, gates_dir: Path, slot_types: Path,
         "flow_version": spec.get("version"),
         "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "pins": spec.get("pins"),
-        "environment": "sandbox",   # all current measurements are sandbox-scoped
+        "environment": "sandbox",   # measurement scope — always sandbox-bounded
     }
+    if env_pin:
+        # the TARGET environment of this translation (kata × env keying) —
+        # distinct from the measurement scope above
+        provenance["environment_doc"] = env_pin
     if twin_report:
         provenance["twin"] = {"runs": twin_report.get("runs"),
                               "seed": twin_report.get("seed")}
@@ -317,9 +385,14 @@ def build_report(flow_path: Path, gates_dir: Path, slot_types: Path,
 
 def render_md(report: dict) -> str:
     p, v = report["provenance"], report["verdict"]
+    env_line = f"Generated {p['generated_utc']} · environment: {p['environment']}"
+    if p.get("environment_doc"):
+        ed = p["environment_doc"]
+        env_line += (f" · target environment: {ed['name']} "
+                     f"({(ed.get('hash') or '?')[:19]}…)")
     lines = [f"# Evidence — {p['kata']} {p['flow']}",
              "",
-             f"Generated {p['generated_utc']} · environment: {p['environment']}",
+             env_line,
              "",
              f"**Overall: {v['overall']}** — requirements {v['requirements']}",
              ""]
@@ -357,6 +430,13 @@ def main() -> int:
     ap.add_argument("--twin-report", type=Path)
     ap.add_argument("--cosim-report", type=Path)
     ap.add_argument("--kata")
+    ap.add_argument("--environment",
+                    help="target environment name (agents/environments/<name>.md) "
+                         "— pinned into provenance.environment_doc")
+    ap.add_argument("--env-hash",
+                    help="sha256:… of the env doc AS THE TRANSLATION READ IT; "
+                         "a mismatch with the on-disk doc flags the evidence "
+                         "(advisory, kata-pin style)")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--no-md", action="store_true")
     args = ap.parse_args()
@@ -365,7 +445,8 @@ def main() -> int:
     cosim = json.loads(args.cosim_report.read_text()) if args.cosim_report else None
 
     report = build_report(args.flow.resolve(), args.gates_dir, args.slot_types,
-                          args.latencies, twin, cosim, args.kata)
+                          args.latencies, twin, cosim, args.kata,
+                          env_name=args.environment, env_hash=args.env_hash)
 
     m = re.match(r"flow_v(\d+)$", args.flow.resolve().stem)
     suffix = f"_v{m.group(1)}" if m else ""

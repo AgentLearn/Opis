@@ -52,6 +52,34 @@ def derive_manifest(spec: dict, wasm: Path, run_secret: str,
     return manifest
 
 
+def apply_real_substitutions(manifest: dict, spec: dict, tape_path: Path,
+                             python: str = "python3") -> tuple[dict, list[str]]:
+    """ADR-005 overlay: mapped gate instances replay recorded reality
+    (adapter serve-gate); the statistical provider stays, wrapped so any
+    tape-mapped world pulses replay too (serve-provider, delegation for
+    the rest). Returns (new manifest, sourced gate names). Pure overlay —
+    the input manifest is not mutated, unmapped gates keep their wasm cmd."""
+    import copy
+    tape = json.loads(tape_path.read_text())
+    adapter = str(Path(__file__).resolve().parent / "real_adapter.py")
+    out = copy.deepcopy(manifest)
+    sourced: list[str] = []
+    for name in tape.get("gates", {}):
+        gspec = spec.get("gates", {}).get(name)
+        if gspec is None or name not in out["gates"]:
+            continue
+        out["gates"][name] = {"cmd": [
+            python, adapter, "serve-gate", "--gate", name,
+            "--spec-json", json.dumps(gspec, sort_keys=True),
+            "--tape", str(tape_path)]}
+        sourced.append(name)
+    fallback = out["body_provider"]["cmd"]
+    out["body_provider"] = {"cmd": [
+        python, adapter, "serve-provider", "--tape", str(tape_path),
+        "--fallback-cmd-json", json.dumps(fallback)]}
+    return out, sorted(sourced)
+
+
 def write_manifest(manifest: dict, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2))

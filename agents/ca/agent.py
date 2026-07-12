@@ -579,8 +579,10 @@ class CAAgent:
 
     def _run_twin(self, twin: str, report: Path,
                   manifest: Path | None = None,
-                  tamper_sigs: bool = False) -> tuple[bool, str]:
-        cmd = [twin, "--spec", str(self.flow_path), "--runs", str(COSIM_RUNS),
+                  tamper_sigs: bool = False,
+                  runs: int | None = None) -> tuple[bool, str]:
+        cmd = [twin, "--spec", str(self.flow_path),
+               "--runs", str(runs if runs is not None else COSIM_RUNS),
                "--seed", str(COSIM_SEED), "--report", str(report)]
         if manifest:
             cmd += ["--substitutions", str(manifest)]
@@ -675,9 +677,56 @@ class CAAgent:
             else:
                 failures.append(f"tampered-token twin run failed: {out[-200:]}")
 
+        # ── ADR-005 sourced pass (keyed runs with a tape only): mapped gates
+        # replay recorded real executions; small N — sourced evidence is
+        # bought by implementation runs, not simulated ones. Additive: the
+        # statistical gauntlet above is untouched.
+        sourced_info = None
+        tape_path = (self.kata_dir / f"tape_{self.env_name}.json"
+                     if self.env_name else None)
+        if tape_path and tape_path.exists():
+            from .manifest import apply_real_substitutions
+            real_manifest, sourced_gates = apply_real_substitutions(
+                json.loads(manifest_path.read_text()), self.spec, tape_path,
+                python=sys.executable)
+            if sourced_gates:
+                real_path = self.ca_dir / "manifest_real.json"
+                write_manifest(real_manifest, real_path)
+                sruns = int(os.environ.get("CA_SOURCED_RUNS", "25"))
+                print(f"  co-sim: sourced pass ({sruns} runs, "
+                      f"{len(sourced_gates)} taped gate(s))...")
+                sourced_rep = self.ca_dir / "twin_sourced.json"
+                ok, out = self._run_twin(twin, sourced_rep, real_path,
+                                         runs=sruns)
+                if ok:
+                    srep = json.loads(sourced_rep.read_text())
+                    sdead = [g for g in srep.get("dead_gates", [])
+                             if g in sourced_gates]
+                    tape = json.loads(tape_path.read_text())
+                    sourced_info = {
+                        "gates": sourced_gates, "runs": sruns,
+                        "tape": {"file": tape_path.name,
+                                 "recorded_utc": tape.get("recorded_utc"),
+                                 "environment": tape.get("environment")},
+                        "dead_sourced_gates": sdead}
+                    if sdead:
+                        failures.append(
+                            f"sourced pass: taped gate(s) DEAD under replay "
+                            f"— recorded reality doesn't drive the flow: {sdead}")
+                    else:
+                        print(f"    sourced pass clean: {len(sourced_gates)} "
+                              f"gate(s) replayed recorded reality, 0 dead")
+                else:
+                    failures.append(f"sourced twin run failed: {out[-200:]}")
+        elif self.env_name:
+            print(f"  co-sim: no tape at {tape_path} — sourced pass skipped "
+                  f"(record one: python -m agents.ca.real_adapter record "
+                  f"--kata {self.kata_name} --env {self.env_name})")
+
         report = {
             "substituted": sorted(self.spec.get("gates", {})),
             "runs": COSIM_RUNS, "seed": COSIM_SEED,
+            "sourced": sourced_info,
             "gates": real.get("gates", {}),
             "baseline_gates": base.get("gates", {}),
             "tamper_fire_delta_sum": tamper_delta,
@@ -696,11 +745,15 @@ class CAAgent:
         return path
 
     def stage_evidence(self, cosim_report: Path) -> None:
-        r = subprocess.run(
-            [sys.executable, str(TOOLS_DIR / "opis-eval" / "evidence.py"),
-             str(self.flow_path), "--kata", self.kata_name,
-             "--twin-report", str(self.ca_dir / "twin_baseline.json"),
-             "--cosim-report", str(cosim_report)],
+        cmd = [sys.executable, str(TOOLS_DIR / "opis-eval" / "evidence.py"),
+               str(self.flow_path), "--kata", self.kata_name,
+               "--twin-report", str(self.ca_dir / "twin_baseline.json"),
+               "--cosim-report", str(cosim_report)]
+        if self.env_name:
+            # pin the TARGET environment as this translation READ it — the
+            # hash from run start, so a doc that moves mid-run gets flagged
+            cmd += ["--environment", self.env_name, "--env-hash", self.env_hash]
+        r = subprocess.run(cmd,
             capture_output=True, text=True, timeout=300)
         for line in (r.stdout or "").strip().splitlines():
             print(f"  {line.strip()}")
