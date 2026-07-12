@@ -54,9 +54,10 @@ WASM_TARGET = "wasm32-wasip1"
 
 
 class CAAgent:
-    def __init__(self, kata_name: str):
+    def __init__(self, kata_name: str, environment: str | None = None):
         self.kata_name = kata_name
         self.kata_dir = REPO_ROOT / "workspace" / kata_name
+        self._load_environment(environment)
         self.flow_path, self.flow_version = self._resolve_flow()
         self.spec = json.loads(self.flow_path.read_text())
         # ephemeral record dir (gitignored); actual cargo build happens in a
@@ -98,6 +99,39 @@ class CAAgent:
                 fh.write(line + "\n")
         except Exception as e:  # noqa: BLE001 — ledger must not fail a run
             print(f"  ⚠ spend ledger write failed (run continues): {e}")
+
+    # ── environment resolution (2026-07-12: runs are keyed kata × env) ──────
+
+    def _load_environment(self, environment: str | None) -> None:
+        """A CA run is keyed (kata × environment). The environment document
+        (agents/environments/<name>.md) is DESCRIPTIVE FACTS, not decisions
+        (2026-07-06): translation targets what it states, assumes nothing it
+        doesn't, and a contract the environment cannot carry is a
+        falsification (environment-exceeds-profile), never a workaround.
+
+        Unkeyed runs stay legal for pre-env-doc katas, but loudly so —
+        'sandbox' provenance is then all the evidence can honestly claim."""
+        name = environment or os.environ.get("CA_ENV")
+        if not name:
+            self.env_name = self.env_path = self.env_text = self.env_hash = None
+            print(f"CA: run NOT keyed to an environment — translation is "
+                  f"environment-blind (legacy). Key it: --env <name> or "
+                  f"CA_ENV, documents in agents/environments/")
+            return
+        path = AGENTS_DIR / "environments" / f"{name}.md"
+        if not path.exists():
+            have = sorted(p.stem for p in
+                          (AGENTS_DIR / "environments").glob("*.md"))
+            raise SystemExit(
+                f"CA: environment '{name}' has no document at {path} — "
+                f"a named environment MUST resolve (facts, not vibes). "
+                f"Available: {have}")
+        self.env_name = name
+        self.env_path = path
+        self.env_text = path.read_text()
+        self.env_hash = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        print(f"CA: keyed (kata × environment) = ({self.kata_name} × {name}), "
+              f"env doc {self.env_hash[:19]}…")
 
     # ── flow resolution ────────────────────────────────────────────────────
 
@@ -353,7 +387,8 @@ class CAAgent:
         for it in range(1, MAX_SCHEMA_ITERATIONS + 1):
             print(f"  schemas: iteration {it}/{MAX_SCHEMA_ITERATIONS}...")
             raw = self._llm(SCHEMA_PROMPT, build_schema_user_prompt(
-                flow_json, contracts, slot_types, errors),
+                flow_json, contracts, slot_types, errors,
+                env_doc=self.env_text or ""),
                 stage="schemas", iteration=it)
             try:
                 doc = self._extract_json(raw)
@@ -372,8 +407,13 @@ class CAAgent:
                          "", "Schema translation found gate-contract decisions that no",
                          "derivable message field can carry. The contract(s) below are",
                          "candidates for demotion/amendment (ADR), not for implementation.", ""]
+                if self.env_name:
+                    lines += [f"Run keyed (kata × environment) = "
+                              f"({self.kata_name} × {self.env_name}); "
+                              f"env doc {self.env_path.name} {self.env_hash}.", ""]
                 for f in doc["falsified"]:
                     lines += [f"## {f.get('gate_template')}",
+                              f"- class: {f.get('class') or 'unclassified'}",
                               f"- decision: {f.get('decision')}",
                               f"- why untranslatable: {f.get('why_untranslatable')}", ""]
                 path.write_text("\n".join(lines))
@@ -458,7 +498,8 @@ class CAAgent:
         for it in range(1, MAX_CODE_ITERATIONS + 1):
             print(f"  codegen: iteration {it}/{MAX_CODE_ITERATIONS}...")
             raw = self._llm(GATE_CODEGEN_PROMPT, build_codegen_user_prompt(
-                flow_json, schemas_json, contracts, errors),
+                flow_json, schemas_json, contracts, errors,
+                env_doc=self.env_text or ""),
                 stage="codegen", iteration=it)
             # raw persisted BEFORE extraction — when extraction/compile goes
             # wrong, the model's actual output is the primary evidence
@@ -671,7 +712,8 @@ class CAAgent:
 
     def run(self) -> None:
         print(f"CA starting — kata: {self.kata_name}, "
-              f"flow: {self.flow_path.name} (v{self.flow_version})")
+              f"flow: {self.flow_path.name} (v{self.flow_version}), "
+              f"environment: {self.env_name or 'UNKEYED (legacy)'}")
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         caps = self.preflight()
         history = self._load_history()

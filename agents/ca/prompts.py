@@ -59,7 +59,8 @@ types, or loci. The flow's archetypes + the base slot-type taxonomy are binding.
   }},
   "falsified": [
     {{"gate_template": "...", "decision": "<the contract decision that cannot be carried>",
-      "why_untranslatable": "<what field would be needed and why no locus/gate can supply it>"}}
+      "why_untranslatable": "<what field would be needed and why no locus/gate can supply it>",
+      "class": "<failure class: prose-exceeds-slots | environment-exceeds-profile | other>"}}
   ]
 }}
 
@@ -84,17 +85,31 @@ and principal-vs-subject.
 upstream schema can carry (no locus produces it, no gate derives it), DO NOT invent a field. \
 Add an entry to `falsified` instead. An honest empty schema set with a falsified entry is a \
 success of this stage, not a failure.
+8. ENVIRONMENT FACTS ARE BINDING — when an Environment section is provided, it is the \
+DESCRIPTIVE record of what actually exists (files, surfaces, executables, persisted state). \
+A field is only derivable if the environment persists or emits the fact it carries: a \
+contract decision that consumes a fact the environment document says is persisted nowhere, \
+streamed by nothing, or that contradicts a stated fact, CANNOT be carried — add it to \
+`falsified` with class "environment-exceeds-profile". Never assume a capability the \
+document does not state; absence of a fact in the document is absence of the fact. \
+(Precedent: 'spend persisted nowhere' + 'agents stream nothing' falsified two tracker \
+instances, 2026-07-11.)
 
 Respond with ONLY the JSON object."""
 
 
 def build_schema_user_prompt(flow_json: str, gate_contracts: str,
-                             slot_types: str, errors: str = "") -> str:
+                             slot_types: str, errors: str = "",
+                             env_doc: str = "") -> str:
     parts = [
         f"## Proved flow (binding)\n```json\n{flow_json}\n```",
         f"## Pinned gate contracts\n{gate_contracts}",
         f"## Base slot-type taxonomy\n{slot_types}",
     ]
+    if env_doc:
+        parts.append(
+            "## Environment (descriptive facts — binding; rule 8 applies)\n"
+            + env_doc)
     if errors:
         parts.append(
             "## Defects in your previous schema document — ALL must be resolved "
@@ -179,12 +194,21 @@ line 1 of main.rs."""
 
 
 def build_codegen_user_prompt(flow_json: str, schemas_json: str,
-                              gate_contracts: str, errors: str = "") -> str:
+                              gate_contracts: str, errors: str = "",
+                              env_doc: str = "") -> str:
     parts = [
         f"## Proved flow — instances, templates, outcomes (binding)\n```json\n{flow_json}\n```",
         f"## Shared message schemas (binding — code against these)\n```json\n{schemas_json}\n```",
         f"## Gate contracts (the decisions to implement)\n{gate_contracts}",
     ]
+    if env_doc:
+        parts.append(
+            "## Environment (descriptive facts — binding constraints)\n"
+            "Decision logic and derived values must be consistent with these "
+            "facts (artifact shapes, invariants, exit-code semantics). Assume "
+            "NOTHING the document does not state. The process model above is "
+            "unchanged — bodies remain schema-derived and deterministic.\n\n"
+            + env_doc)
     if errors:
         parts.append(
             "## Defects in your previous implementation — ALL must be resolved "

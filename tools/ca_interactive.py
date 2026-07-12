@@ -31,7 +31,9 @@ def main() -> None:
     canned_main_rs = (agent.ca_dir / "main.rs").read_text()
     calls = {"n": 0}
 
-    def fake_llm(system: str, user: str, max_tokens: int = 64000) -> str:
+    def fake_llm(system: str, user: str, max_tokens: int = 64000, **kwargs) -> str:
+        # **kwargs absorbs _llm's spend-ledger params (stage/iteration,
+        # 2026-07-11) — no API call happens here, nothing to record
         calls["n"] += 1
         if calls["n"] > 1:
             print("  interactive run: a verifier rejected the canned main.rs — "

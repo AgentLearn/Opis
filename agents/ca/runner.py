@@ -5,6 +5,12 @@ CA runner — implement + co-sim a kata's committed flow.
 Usage:
   python -m agents.ca.runner                    # every kata with a committed flow
   python -m agents.ca.runner silicon_sandwiches # one kata
+  python -m agents.ca.runner opis_workbench --env opis_repo
+                                                # keyed (kata × environment) run
+
+--env <name> (or CA_ENV) resolves agents/environments/<name>.md; a named
+environment that doesn't resolve refuses the run. Unkeyed runs are legal
+but environment-blind (loud legacy warning).
 """
 
 import re
@@ -25,15 +31,24 @@ def katas_with_flows() -> list[str]:
 
 
 def main():
-    names = sys.argv[1:] or katas_with_flows()
+    args = sys.argv[1:]
+    env = None
+    if "--env" in args:
+        i = args.index("--env")
+        if i + 1 >= len(args):
+            sys.exit("--env requires a name (agents/environments/<name>.md)")
+        env = args[i + 1]
+        del args[i:i + 2]
+    names = args or katas_with_flows()
     if not names:
         print("No katas with a committed flow_vN.json found in workspace/ — "
               "run FA first (CA implements proved flows only).")
         sys.exit(0)
     for name in names:
-        print(f"\n{'=' * 60}\nCA — kata: {name}\n{'=' * 60}")
+        print(f"\n{'=' * 60}\nCA — kata: {name}"
+              f"{f' × env: {env}' if env else ''}\n{'=' * 60}")
         from agents.ca.agent import CAAgent
-        CAAgent(name).run()
+        CAAgent(name, environment=env).run()
 
 
 if __name__ == "__main__":
