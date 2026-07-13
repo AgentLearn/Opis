@@ -1,0 +1,33 @@
+{
+  "_comment": "prompt-skill lock \u2014 sha256 over full file bytes; verify/re-pin with tools/opis-eval/prompt_pins.py (--write). A mismatch means an agent prompt changed without an explicit re-pin.",
+  "skills": {
+    "ca_codegen.md": {
+      "binding": "GATE_CODEGEN_PROMPT",
+      "hash": "sha256:f6c515978d0f23b2f35476adcb01e21f18b5a07a1b2b0261c08da9dce8e50b54"
+    },
+    "ca_schema.md": {
+      "binding": "SCHEMA_PROMPT",
+      "hash": "sha256:2be76106700f7c22027192a318415332806432040ac18594699f1ecf3f019025"
+    },
+    "fa_gate_amendment.md": {
+      "binding": "GATE_AMENDMENT_PROMPT",
+      "hash": "sha256:9cbcd18da0e673a1083f026da7fa7dab9d33077d0159913df50085f2e3b84444"
+    },
+    "fa_gate_generation.md": {
+      "binding": "GATE_GENERATION_PROMPT",
+      "hash": "sha256:9a67a2119a6e9554f5430abf47d66a4b9a75e49d107107332891d54881ca547d"
+    },
+    "fa_gate_index_row.md": {
+      "binding": "GATE_INDEX_ROW_PROMPT",
+      "hash": "sha256:9da9c2a734067954b5cce3473348a510f387b5b4a7ddfa8be59f231ec6dc1df7"
+    },
+    "fa_system.md": {
+      "binding": "SYSTEM_PROMPT",
+      "hash": "sha256:925f73eff8a59c94c94f901c2613f279b36c93db98eb7b329f18188d5592403e"
+    },
+    "fa_taxonomy.md": {
+      "binding": "TAXONOMY_PROMPT",
+      "hash": "sha256:e79afeb975cbfa31c68aadcbf8c50724af5b040e6fdbe8b35e45abbf8e196f68"
+    }
+  }
+}

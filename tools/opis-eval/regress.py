@@ -231,6 +231,23 @@ def main() -> None:
             for sub in line.splitlines():
                 print(err(f"  {sub}"))
 
+    # Prompt-skill pins: FA/CA prompts live as repo skills (agents/skills/,
+    # `binding:` frontmatter) and are proof machinery like gate contracts —
+    # every committed flow was produced THROUGH them. A hash mismatch against
+    # agents/skills/pins.json means an agent prompt changed without an
+    # explicit re-pin (prompt_pins.py --write) — always a regression.
+    print(hdr("Prompt-skill pins (agents/skills vs pins.json)"))
+    prompt_pins_mod = _load("opis_prompt_pins", HERE / "prompt_pins.py")
+    skills_dir = gates_dir.parent / "skills"
+    prompt_errors = prompt_pins_mod.verify_pins(skills_dir)
+    if not prompt_errors:
+        print(ok("every binding-bearing prompt skill matches the lock"))
+    else:
+        total_regressions += len(prompt_errors)
+        for line in prompt_errors:
+            for sub in line.splitlines():
+                print(err(f"  {sub}"))
+
     # ADVISORY: prose-exceeds-slots lint over the current library. Heuristic
     # warnings only — NEVER counted as regressions (4/4 CA falsifications to
     # date were this class; the lint shifts it left of CA, but a heuristic

@@ -30,6 +30,15 @@ ROUTES = {
     ("GET", "gate"): (actions.gate, ["kata", "name"]),
     ("GET", "evidence"): (actions.evidence, ["kata"]),
     ("GET", "adrs"): (actions.adrs, ["kata"]),
+    ("GET", "flow_versions"): (actions.flow_versions, ["kata"]),
+    ("GET", "flow_diff"): (actions.flow_diff, ["kata", "v_from", "v_to"]),
+    ("GET", "adr_pending"): (actions.adr_pending, ["kata"]),
+    ("GET", "run/status"): (actions.agent_run_status, ["kata", "agent"]),
+    ("POST", "adr_decide"): (actions.adr_decide,
+                             ["kata", "file", "choice", "rationale"]),
+    ("POST", "whatif"): (actions.speculative_run, ["kata", "spec", "label"]),
+    ("POST", "run/start"): (actions.agent_run_start, ["kata", "agent"]),
+    ("POST", "run/stop"): (actions.agent_run_stop, ["kata", "agent"]),
     ("POST", "run/eval"): (actions.run_eval, ["kata"]),
     ("POST", "run/proof"): (actions.run_proof, ["kata"]),
     ("POST", "run/regress"): (actions.run_regress, ["kata"]),
@@ -59,6 +68,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"no action for {method} /api/{route}"}, 404)
         fn, params = entry
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if method == "POST":
+            n = int(self.headers.get("Content-Length") or 0)
+            if n:
+                try:
+                    q.update(json.loads(self.rfile.read(n)))
+                except json.JSONDecodeError:
+                    return self._json({"error": "POST body is not JSON"}, 400)
         kwargs = {p: q[p] for p in params if p in q}
         try:
             return self._json(fn(**kwargs))
