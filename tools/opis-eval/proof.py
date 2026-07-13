@@ -216,6 +216,168 @@ def trace_reachability_with_paths(
     return dict(reachable), pred
 
 
+def trace_origins(
+    spec: dict,
+) -> tuple[dict[str, set[tuple[str, str]]], dict[tuple[str, str, str], tuple | None]]:
+    """Origin-tainted reachability (per-source witness, Zarko 2026-07-13,
+    after the live origin-blind specimen: flow_v4 with every DomainExpert
+    synapse stripped still proved 34/34 — trace_reachability_with_paths
+    keeps ONE predecessor per (node, type), so a requirement is satisfied
+    by ANY source that can supply the types).
+
+    Same fixed point as trace_reachability_with_paths, but the unit of
+    propagation is the (pulse_type, origin_source) PAIR and emission is
+    taint inheritance: when a gate fires, each emitted type inherits every
+    origin carried by the gate's REQUIRED (non-optional) inputs — optional
+    inputs never grant origin (decorative wiring must not prove agency).
+    Gate firing itself stays type-based and identical to the blind tracer;
+    only attribution is richer. Kept as a separate pass, run only for
+    flows that pin an origin: the blind tracer's pred choices (and thus
+    every existing witness path in the corpus) stay byte-stable.
+
+    opred[(node, type, origin)]:
+      None                                   → true start (source locus)
+      (prev_node, type, origin)              → crossed a real edge
+      ("__gate__", gate, in_type, origin, m) → emitted by `gate` firing
+                                               (m = fired|fallback),
+                                               chain continues INTO the
+                                               required input that carried
+                                               the origin — end-to-end,
+                                               through gates, unlike the
+                                               blind tracer's gate-boundary
+                                               cutoff.
+    """
+    nodes, gates, edges = eval_mod.build_graph(spec)
+    fwd, _ = eval_mod.adjacency(edges)
+    type_dag = eval_mod.build_type_dag(spec)
+
+    has_incoming = set(e.dst for e in edges if not e.inhibitor)
+    pure_sources = [n for n in nodes if n not in has_incoming]
+    loci_spec = spec.get("loci", {})
+    explicit_sources = {
+        name for name, lspec in loci_spec.items()
+        if isinstance(lspec, dict) and lspec.get("source")
+    }
+    true_sources = set(pure_sources) | explicit_sources
+
+    oreach: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    opred: dict[tuple[str, str, str], tuple | None] = {}
+    emitted_pairs: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    fired: dict[str, str] = {}
+    queue: deque[str] = deque()
+
+    def add(node: str, ptype: str, origin: str, entry: tuple | None) -> None:
+        if (ptype, origin) not in oreach[node]:
+            oreach[node].add((ptype, origin))
+            opred[(node, ptype, origin)] = entry
+            queue.append(node)
+
+    for s in true_sources:
+        for edge in fwd.get(s, []):
+            if edge.pulse_type and not edge.inhibitor:
+                add(s, edge.pulse_type, s, None)
+
+    def types_at(gname: str) -> set[str]:
+        return {t for t, _o in oreach.get(gname, set())}
+
+    def try_fire(gname: str, gspec: dict, fallback: bool = False) -> None:
+        if gname in fired:
+            return
+        if not fallback and not gate_logic_satisfied(gspec, types_at(gname), type_dag):
+            return
+        fired[gname] = FALLBACK if fallback else FIRED
+        queue.append(gname)
+
+    def emit(gname: str, gspec: dict) -> None:
+        """Taint inheritance — idempotent, re-run whenever new pairs arrive
+        at an already-fired gate (monotone: origins only accumulate)."""
+        required = set(gspec.get("requires", [])) - set(gspec.get("optional", []))
+        marker = fired[gname]
+        # origin -> the required input type that carries it (first by sort,
+        # deterministic). No requires (degenerate) → any arrived input.
+        carriers: dict[str, str] = {}
+        for t, o in sorted(oreach.get(gname, set())):
+            if o in carriers:
+                continue
+            grants = (
+                any(t == r or t in type_dag.get(r, set()) for r in required)
+                if required else True
+            )
+            if grants:
+                carriers[o] = t
+        for flow in eval_mod.extract_emitted_flows(gspec.get("emits", [])):
+            for o, t_in in carriers.items():
+                # a gate's own emission never claims itself as origin via
+                # its input side twice — add() dedups on (flow, o)
+                emitted_pairs[gname].add((flow, o))
+                add(gname, flow, o, ("__gate__", gname, t_in, o, marker))
+
+    def drain() -> None:
+        while queue:
+            node = queue.popleft()
+            if node in gates:
+                if node in fired:
+                    emit(node, gates[node])
+                # NO PASS-THROUGH (same 2026-07-01 semantics as the blind
+                # tracer): a gate forwards only pairs born of its own
+                # emission; input-arrived pairs die at the gate unless
+                # re-emitted through taint inheritance.
+                forwardable = emitted_pairs[node] & oreach[node]
+            else:
+                forwardable = set(oreach[node])
+            for edge in fwd.get(node, []):
+                if edge.inhibitor:
+                    continue
+                for t, o in forwardable:
+                    if edge.pulse_type and t != edge.pulse_type:
+                        continue
+                    add(edge.dst, t, o, (node, t, o))
+            if node in gates:
+                try_fire(node, gates[node])
+
+    drain()
+    for gname, gspec in gates.items():
+        if gname not in fired:
+            try_fire(gname, gspec, fallback=True)
+    drain()
+
+    return dict(oreach), opred
+
+
+def reconstruct_origin_path(
+    opred: dict[tuple[str, str, str], tuple | None],
+    node: str, ptype: str, origin: str,
+) -> list[dict[str, Any]]:
+    """Walk an origin-tainted chain back to its true start. Unlike
+    reconstruct_path this walks THROUGH gate firings (the `__gate__`
+    entry continues into the input that carried the origin), so the
+    result is one end-to-end route: origin locus → … → target."""
+    chain: list[dict[str, Any]] = []
+    cur = (node, ptype, origin)
+    seen = {cur}
+    while True:
+        entry = opred.get(cur)
+        if entry is None:
+            chain.append({"node": cur[0], "pulse_type": cur[1]})
+            break
+        if entry[0] == "__gate__":
+            _, gname, t_in, o, marker = entry
+            chain.append({
+                "node": cur[0], "pulse_type": cur[1],
+                "fired": "fired" if marker == FIRED else "fallback",
+            })
+            nxt = (gname, t_in, o)
+        else:
+            chain.append({"node": cur[0], "pulse_type": cur[1]})
+            nxt = entry
+        if nxt in seen:
+            break  # defensive
+        seen.add(nxt)
+        cur = nxt
+    chain.reverse()
+    return chain
+
+
 def reconstruct_path(
     pred: dict[tuple[str, str], tuple[str, str] | None], node: str, ptype: str
 ) -> list[dict[str, Any]]:
@@ -255,6 +417,7 @@ def find_requirement_proof(
     reachable: dict[str, set[str]],
     pred: dict[tuple[str, str], tuple[str, str] | None],
     type_dag: dict[str, set[str]],
+    origin_trace: tuple[dict, dict] | None = None,
 ) -> dict:
     target = requirement.get("target", {}) or {}
     gate_name = target.get("gate")
@@ -332,6 +495,51 @@ def find_requirement_proof(
                 f"cycle: seed it externally or split the fan-out from the join."
             )
 
+    # ORIGIN PIN (Zarko, 2026-07-13 — per-source witness): a requirement
+    # asserting an ACTOR's capability names that actor in `origin`; proof
+    # then demands ≥1 REQUIRED input at the target gate witnessable from
+    # that source locus end-to-end (other inputs may come from anywhere —
+    # AND-joins legitimately mix actors: expert command + sentinel token).
+    # Requirements without `origin` keep the origin-blind behavior (legacy;
+    # the stripped-synapse specimen proved that blindness is real).
+    origin = requirement.get("origin")
+    if origin:
+        loci_spec = spec.get("loci", {})
+        lspec = loci_spec.get(origin)
+        if not isinstance(lspec, dict) or not lspec.get("source"):
+            result["issues"].append(
+                f"origin '{origin}' is not a source locus in this flow — "
+                f"an origin pin must name the actor that injects the pulse")
+        elif origin_trace is not None:
+            oreach, opred = origin_trace
+            pairs_here = oreach.get(gate_name, set())
+            witness_type = None
+            for t in sorted(required):
+                for cand in sorted({t} | type_dag.get(t, set())):
+                    if (cand, origin) in pairs_here:
+                        witness_type = cand
+                        break
+                if witness_type:
+                    break
+            if witness_type is None:
+                all_satisfied = False
+                result["issues"].append(
+                    f"origin '{origin}' cannot drive gate '{gate_name}': no "
+                    f"required input type is witnessable from that source — "
+                    f"the actor this requirement asserts has no real path here")
+            else:
+                path = reconstruct_origin_path(opred, gate_name, witness_type, origin)
+                result["origin_proof"] = {
+                    "origin": origin, "pulse_type": witness_type, "path": path,
+                }
+                fb = [h for h in path if h.get("fired") == "fallback"]
+                if fb:
+                    all_satisfied = False
+                    result["issues"].append(
+                        f"origin witness for '{origin}' passes through "
+                        f"force-fired '{fb[0]['node']}' — bootstrap deadlock, "
+                        f"dynamically that route never carries the pulse")
+
     if all_satisfied and not result["issues"]:
         result["status"] = "proved"
 
@@ -342,8 +550,16 @@ def verify_requirements(spec: dict, gates_dir: Path) -> list[dict]:
     requirements = spec.get("requirements", [])
     reachable, pred = trace_reachability_with_paths(spec)
     type_dag = eval_mod.build_type_dag(spec)
+    # The origin trace runs only when some requirement pins an origin —
+    # legacy flows never touch it, so their witness paths stay byte-stable.
+    origin_trace = (
+        trace_origins(spec)
+        if any(isinstance(r, dict) and r.get("origin") for r in requirements)
+        else None
+    )
     return [
-        find_requirement_proof(spec, gates_dir, r, reachable, pred, type_dag)
+        find_requirement_proof(spec, gates_dir, r, reachable, pred, type_dag,
+                               origin_trace)
         for r in requirements
     ]
 

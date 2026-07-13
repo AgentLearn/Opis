@@ -23,7 +23,7 @@
     },
     "fa_system.md": {
       "binding": "SYSTEM_PROMPT",
-      "hash": "sha256:925f73eff8a59c94c94f901c2613f279b36c93db98eb7b329f18188d5592403e"
+      "hash": "sha256:f8cecb534070c3618b3c3e8fb65b5e7dcecabbdbaa49b0c118b463ed9a9e00d7"
     },
     "fa_taxonomy.md": {
       "binding": "TAXONOMY_PROMPT",

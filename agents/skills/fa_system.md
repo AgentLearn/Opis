@@ -84,7 +84,8 @@ Schema:
     {
       "id": "<REQ-1, REQ-2, ...>",
       "text": "<the kata requirement this satisfies, in your own words>",
-      "target": {"gate": "<GateName>", "outcome": "<outcome name from that gate's emits>"}
+      "target": {"gate": "<GateName>", "outcome": "<outcome name from that gate's emits>"},
+      "origin": "<SourceLocus — only when the requirement asserts an actor's capability; omit otherwise>"
     }
   ]
 }
@@ -121,6 +122,15 @@ verified structurally after you respond (a path is reconstructed through the flo
 a source locus to that gate/outcome). If you cannot name a specific gate and outcome for a
 requirement, the flow is incomplete — fix the wiring, don't just describe it. A requirement
 with no honest target means a missing gate or a missing synapse, not a documentation gap.
+
+When a requirement asserts a specific ACTOR's capability ("the customer can order", "the
+domain expert can decide"), set `origin` to that actor's source locus. The prover then
+demands an end-to-end witness path from THAT locus to the target gate — at least one of the
+gate's required inputs must genuinely trace back to the named actor (the rest may come from
+anywhere: joins legitimately mix actors, e.g. a command from the actor plus a token from a
+sentinel). Without `origin`, any source satisfies the proof, so an actor requirement left
+unpinned can be "proved" by wiring that never touches the actor. System invariants that
+belong to no single actor (persistence, timeouts, recording) omit `origin`.
 
 ## Gate logic rule
 Do not fake threshold, first-response, or circuit-breaker semantics with synthetic outcome
