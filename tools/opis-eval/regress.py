@@ -248,6 +248,46 @@ def main() -> None:
             for sub in line.splitlines():
                 print(err(f"  {sub}"))
 
+    # Confirmed scenarios: expert-confirmed user stories are kata-keyed
+    # fixtures that SURVIVE flow rebuilds — each is re-verified against the
+    # CURRENT canonical flow (the pin is provenance, not a freeze). Gates
+    # get regenerated every flow version; confirmed scenarios are the
+    # behavioral regression suite gates can't be. A flow that breaks one is
+    # a regression (or a domain change the expert must re-confirm).
+    import json as _json
+    print(hdr("Confirmed scenarios (user stories vs canonical flow)"))
+    scenario_tool = HERE / "scenario.py"
+    n_scen = 0
+    for kata_dir in kata_dirs:
+        flow_path = canonical_flow(kata_dir)
+        scen_dir = kata_dir / "scenarios"
+        if not flow_path or not scen_dir.is_dir():
+            continue
+        for sc_path in sorted(scen_dir.glob("*.json")):
+            try:
+                sc = _json.loads(sc_path.read_text())
+            except (ValueError, OSError):
+                continue
+            if "confirmed" not in sc:
+                continue  # drafts/candidates never gate the board
+            n_scen += 1
+            r = subprocess.run(
+                [sys.executable, str(scenario_tool), "verify",
+                 str(sc_path), str(flow_path)],
+                capture_output=True, text=True)
+            if r.returncode == 0:
+                print(ok(f"{kata_dir.name}: '{sc.get('name', sc_path.stem)}' "
+                         f"holds vs {flow_path.name}"))
+            else:
+                total_regressions += 1
+                print(err(f"{kata_dir.name}: '{sc.get('name', sc_path.stem)}' "
+                          f"BROKEN vs {flow_path.name}"))
+                for line in (r.stdout + r.stderr).strip().splitlines():
+                    if "✗" in line:
+                        print(err(f"  {line.strip()}"))
+    if n_scen == 0:
+        print(info("no confirmed scenarios found — nothing to verify"))
+
     # ADVISORY: prose-exceeds-slots lint over the current library. Heuristic
     # warnings only — NEVER counted as regressions (4/4 CA falsifications to
     # date were this class; the lint shifts it left of CA, but a heuristic
