@@ -615,10 +615,24 @@ class CAAgent:
         dead = real.get("dead_gates", [])
         failures = [f"dead gate under substitution: {g}" for g in dead]
 
-        # negative path: if the flow claims auth, tampered tokens MUST change
-        # behavior. Identical fire% under tampering = the auth isn't real.
-        auth_gates = [n for n, g in self.spec.get("gates", {}).items()
-                      if g.get("auth_required")]
+        # negative path: tampered tokens MUST change behavior. Identical
+        # fire% under tampering = the auth isn't real. Trigger on WIRED
+        # sig-bearing types (any type a sentinel/regulator emits, consumed by
+        # a non-sentinel gate), NOT on the auth_required flag: flow_v5
+        # (2026-07-13, falsification #6) declared auth_required:false on all
+        # 13 token consumers, so flag-keyed triggering would have SKIPPED the
+        # exact probe that catches the defect — a flow that drops the authZ
+        # claim must not drop the authZ check.
+        gates_spec = self.spec.get("gates", {})
+        sig_types: set = set()
+        for g in gates_spec.values():
+            if g.get("kind") in ("sentinel", "regulator"):
+                for e in g.get("emits", []):
+                    sig_types.update(e.get("flows", []) if isinstance(e, dict) else [e])
+        auth_gates = [n for n, g in gates_spec.items()
+                      if g.get("kind") not in ("sentinel", "regulator")
+                      and (set(g.get("requires", [])) & sig_types
+                           or g.get("auth_required"))]
         tamper_delta = None
         outcome_delta = None
         if auth_gates:

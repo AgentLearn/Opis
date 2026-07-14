@@ -14,6 +14,9 @@ Checks:
   3. Cycles (SCCs)      — Tarjan's algorithm; reported, not flagged (cycles are valid)
   4. Hop depth          — minimum hops from any injection point to each gate
   5. Sentinel coverage  — gates with no sentinel upstream are flagged (security gap)
+  5b. Authorization reality — ERROR: gate requires a sentinel-emitted (sig-bearing)
+                          type but declares auth_required:false (credential consumed,
+                          never verified — CA falsification class #6, flow_v5)
   6. Silent gates       — gates that fire but emit nothing (signal dead-ends)
   7. Window feasibility — cascade min-hops vs gate window_ms (warns if path may time out)
   8. Cardinality        — shared loci flagged as scaling ceilings; per_instance/shared
@@ -706,6 +709,43 @@ def check_sentinel_coverage(
             )
 
     return warnings
+
+
+# ── Check 5b: authorization reality ──────────────────────────────────────────
+#
+# Shift-left of CA falsification #6 (flow_v5, 2026-07-13, class:
+# authorization-not-real): all 13 executors required auth_token yet declared
+# auth_required:false — the sentinel signs, executors consume the token as a
+# timing input, and NOBODY verifies. Forge-on-the-wire tamper: Σ|Δfire%| = 0.
+# The static symptom is exact: a gate whose `requires` includes a sig-bearing
+# type (any type EMITTED by a sentinel/regulator — derived, never a name
+# heuristic) while declaring auth_required:false consumes credentials it does
+# not check. That is an ERROR, not a warning: the flow claims a security
+# property it cannot have.
+
+def check_auth_reality(gates: dict[str, Any]) -> list[str]:
+    """Every consumer of a sentinel-emitted (sig-bearing) type must declare
+    auth_required:true. Sentinels/regulators themselves (the issuers) are
+    exempt. Returns error strings."""
+    sig_types: set[str] = set()
+    for g in gates.values():
+        if g.get("kind") in ("sentinel", "regulator"):
+            sig_types.update(extract_emitted_flows(g.get("emits", [])))
+    if not sig_types:
+        return []
+    errors: list[str] = []
+    for gname, gspec in gates.items():
+        if gspec.get("kind") in ("sentinel", "regulator"):
+            continue
+        consumed = sorted(set(gspec.get("requires", [])) & sig_types)
+        if consumed and not gspec.get("auth_required", False):
+            errors.append(
+                f"gate '{gname}': requires sig-bearing type(s) {consumed} "
+                f"(sentinel-emitted) but declares auth_required:false — "
+                f"credential consumed as timing input, never verified "
+                f"(authorization-not-real; CA falsification class #6)"
+            )
+    return errors
 
 
 # ── Check 6: silent gates ─────────────────────────────────────────────────────
@@ -1417,6 +1457,15 @@ def main() -> None:
             for w in warns: print(warn(w))
         else:
             print(ok("all non-sentinel gates have upstream sentinel coverage"))
+
+    # ── 5b. Authorization reality ─────────────────────────────────────────────
+    print(hdr("5b. Authorization reality (sig-consumers must verify)"))
+    auth_errs = check_auth_reality(gates)
+    if auth_errs:
+        all_errors.extend(auth_errs)
+        for e in auth_errs: print(err(e))
+    else:
+        print(ok("every consumer of a sentinel-emitted type declares auth_required:true"))
 
     # ── 6. Silent gates ───────────────────────────────────────────────────────
     print(hdr("6. Silent gates (signal dead-ends)"))
