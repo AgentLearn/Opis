@@ -255,12 +255,34 @@ def validate_scenario(sc: dict) -> list[str]:
     return errs
 
 
+def same_type_contention(sc: dict) -> list[str]:
+    """Pulse types that arrive more than once across the stimulus multiset —
+    either count > 1 on one stimulus or the same type from several sources.
+    The current da-twin is SINGLE-ADMISSION (earliest arrival per (gate,
+    type) wins; each gate fires at most once per run), so these scenarios
+    are statically verifiable but DYNAMICALLY INEXPRESSIBLE until the
+    multi-admission twin exists (agenda, 2026-07-14). Any future cosim leg
+    MUST refuse them loudly rather than simulate a collapsed race."""
+    counts: dict[str, int] = {}
+    for s in sc.get("stimuli", []):
+        counts[s.get("type", "?")] = counts.get(s.get("type", "?"), 0) \
+            + int(s.get("count", 1))
+    return sorted(t for t, n in counts.items() if n > 1)
+
+
 # ── verify ────────────────────────────────────────────────────────────────────
 
 def verify(sc: dict, flow: Flow) -> tuple[list[str], list[str]]:
     """Returns (disproofs, notes)."""
     disproofs: list[str] = []
     notes: list[str] = []
+    contended = same_type_contention(sc)
+    if contended:
+        notes.append(
+            f"same-type contention on {contended}: static leg only — the "
+            f"current twin is single-admission (earliest arrival wins), so "
+            f"the dynamic/contention leg CANNOT express this scenario yet "
+            f"(multi-admission twin = open agenda item)")
     succ_all: dict[str, list[str]] = {}
     fail_all: dict[str, list[str]] = {}
     for s in sc["stimuli"]:
