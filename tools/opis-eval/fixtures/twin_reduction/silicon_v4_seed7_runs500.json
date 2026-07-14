@@ -1,0 +1,177 @@
+{
+  "bottleneck": {
+    "gate": "KitchenCompletionRecorder",
+    "p99_ms": 608038.0411880316
+  },
+  "dead_gates": [],
+  "e2e_p99_ms": 608038.0411880316,
+  "flow": "flow_v4",
+  "gates": {
+    "DriverCompletionRecorder": {
+      "fire_pct": 14.2,
+      "mean_ms": 176995.67180861506,
+      "outcomes": {
+        "completed": 33,
+        "unacknowledged": 38
+      },
+      "p50_ms": 179742.9996019577,
+      "p95_ms": 305972.1234004907,
+      "p99_ms": 312335.5575018514,
+      "service_source": "uniform"
+    },
+    "DriverTracker": {
+      "fire_pct": 14.2,
+      "mean_ms": 49344.659496134715,
+      "outcomes": {
+        "tracking": 71
+      },
+      "p50_ms": 51568.4704491291,
+      "p95_ms": 74958.36262077153,
+      "p99_ms": 80026.52858868559,
+      "service_source": "uniform"
+    },
+    "KitchenCompletionRecorder": {
+      "fire_pct": 12.4,
+      "mean_ms": 313920.16209137853,
+      "outcomes": {
+        "completed": 29,
+        "unacknowledged": 33
+      },
+      "p50_ms": 340000.60494384787,
+      "p95_ms": 566353.8632447162,
+      "p99_ms": 608038.0411880316,
+      "service_source": "uniform"
+    },
+    "KitchenDispatcher": {
+      "fire_pct": 26.6,
+      "mean_ms": 14983.702378923286,
+      "outcomes": {
+        "driver_dispatch": 71,
+        "kitchen_submission": 62
+      },
+      "p50_ms": 15326.170386874906,
+      "p95_ms": 23974.460050926824,
+      "p99_ms": 27656.647483719324,
+      "service_source": "uniform"
+    },
+    "KitchenQueueResolver": {
+      "fire_pct": 100.0,
+      "mean_ms": 2443.9931437604137,
+      "outcomes": {
+        "resolved": 500
+      },
+      "p50_ms": 2376.990535922021,
+      "p95_ms": 4750.782147521225,
+      "p99_ms": 4915.375895487688,
+      "service_source": "uniform"
+    },
+    "LoyaltyAccumulator": {
+      "fire_pct": 12.4,
+      "mean_ms": 263766.29712845513,
+      "outcomes": {
+        "reward": 62
+      },
+      "p50_ms": 239938.96193188656,
+      "p95_ms": 554742.9669597484,
+      "p99_ms": 578561.1972444642,
+      "service_source": "uniform"
+    },
+    "MapResolverA": {
+      "fire_pct": 100.0,
+      "mean_ms": 2926.8550518216316,
+      "outcomes": {
+        "resolved": 500
+      },
+      "p50_ms": 2799.11759825561,
+      "p95_ms": 5672.820337425707,
+      "p99_ms": 5951.574283171591,
+      "service_source": "uniform"
+    },
+    "MapResolverB": {
+      "fire_pct": 100.0,
+      "mean_ms": 2951.793396490173,
+      "outcomes": {
+        "resolved": 500
+      },
+      "p50_ms": 2878.386932320112,
+      "p95_ms": 5724.623844626285,
+      "p99_ms": 5955.242755178218,
+      "service_source": "uniform"
+    },
+    "MenuAuthSentinel": {
+      "fire_pct": 100.0,
+      "mean_ms": 2407.375310493902,
+      "outcomes": {
+        "denied": 272,
+        "issued": 228
+      },
+      "p50_ms": 2214.2370364799663,
+      "p95_ms": 4828.525570731802,
+      "p99_ms": 4970.8179299702015,
+      "service_source": "uniform"
+    },
+    "MenuWriter": {
+      "fire_pct": 45.6,
+      "mean_ms": 16510.660618331385,
+      "outcomes": {
+        "committed": 112,
+        "rejected": 116
+      },
+      "p50_ms": 15658.255067265707,
+      "p95_ms": 30127.107506451306,
+      "p99_ms": 33072.86859528591,
+      "service_source": "uniform"
+    },
+    "OrderValidator": {
+      "fire_pct": 100.0,
+      "mean_ms": 2493.0340488862153,
+      "outcomes": {
+        "accepted": 231,
+        "rejected": 269
+      },
+      "p50_ms": 2560.364405145718,
+      "p95_ms": 4671.726853457048,
+      "p99_ms": 4925.907603742635,
+      "service_source": "uniform"
+    },
+    "PaymentAuthorizer": {
+      "fire_pct": 100.0,
+      "mean_ms": 4953.247360001437,
+      "outcomes": {
+        "confirmed": 243,
+        "failed": 257
+      },
+      "p50_ms": 4797.278370083311,
+      "p95_ms": 9520.763439334609,
+      "p99_ms": 9908.233833599443,
+      "service_source": "uniform"
+    },
+    "QueueEstimator": {
+      "fire_pct": 100.0,
+      "mean_ms": 6514.822553681718,
+      "outcomes": {
+        "estimate": 500
+      },
+      "p50_ms": 6517.663270062741,
+      "p95_ms": 11201.754447703706,
+      "p99_ms": 12308.80622769906,
+      "service_source": "uniform"
+    },
+    "RoutingAggregator": {
+      "fire_pct": 100.0,
+      "mean_ms": 6718.617454898499,
+      "outcomes": {
+        "decision": 257,
+        "provider_queries": 243
+      },
+      "p50_ms": 6552.389194302397,
+      "p95_ms": 11718.893352599305,
+      "p99_ms": 13496.96220861118,
+      "service_source": "uniform"
+    }
+  },
+  "latencies": null,
+  "runs": 500,
+  "seed": 7,
+  "substituted_gates": []
+}

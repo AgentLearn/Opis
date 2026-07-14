@@ -1,0 +1,19 @@
+{
+  "loci": {"SrcA1": {"source": true}, "SrcA2": {"source": true}, "SrcB": {"source": true}},
+  "gates": {
+    "EmitterA": {"requires": ["go_a"], "window_ms": 50, "refractory_ms": 5,
+                 "emits": [{"outcome": "ok", "flows": ["t_a"], "weight": 1}]},
+    "EmitterB": {"requires": ["go_b"], "window_ms": 50, "refractory_ms": 5,
+                 "emits": [{"outcome": "ok", "flows": ["t_b"], "weight": 1}]},
+    "Keyed":    {"entity_key": "order_id", "requires": ["t_a", "t_b"],
+                 "window_ms": 50, "refractory_ms": 5,
+                 "emits": [{"outcome": "joined", "flows": [], "weight": 1}]}
+  },
+  "synapses": [
+    {"from": "SrcA1", "to": "EmitterA", "pulse_type": "go_a"},
+    {"from": "SrcA2", "to": "EmitterA", "pulse_type": "go_a"},
+    {"from": "SrcB",  "to": "EmitterB", "pulse_type": "go_b"},
+    {"from": "EmitterA", "to": "Keyed", "pulse_type": "t_a"},
+    {"from": "EmitterB", "to": "Keyed", "pulse_type": "t_b"}
+  ]
+}

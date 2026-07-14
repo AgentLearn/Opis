@@ -50,6 +50,10 @@ pub struct GateModel {
     outcomes: Vec<OutcomeModel>,    // exclusive outcome bundles
     window_ms: f64,                 // coincidence window / max service time
     refractory_ms: f64,             // min service time
+    /// FA-derived flow frontmatter (2026-07-14): names the pulse-BODY field
+    /// that identifies the domain object this gate's windows are keyed by.
+    /// None = keyless gate (single shared queue per input type).
+    entity_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -222,6 +226,7 @@ impl Topology {
                 outcomes,
                 window_ms: hi,
                 refractory_ms: lo,
+                entity_key: gv.get("entity_key").and_then(|x| x.as_str()).map(String::from),
             });
         }
 
@@ -404,16 +409,252 @@ fn service_model(gate: &GateModel, lib: Option<&LatencyLib>) -> (ServiceSource, 
     }
 }
 
-// ── Simulation ─────────────────────────────────────────────────────────────────
+// ── Simulation: multi-admission engine ─────────────────────────────────────────
+//
+// 2026-07-14 (strategy.md "MULTI-ADMISSION TWIN — DESIGN CLOSED"). Replaces
+// the single-admission engine (earliest arrival per (gate, type), fire ≤1×
+// per run) with WINDOWED FIFO PER ENTITY KEY:
+//
+//   - every delivery is a PULSE with identity (id, parents, stimuli, key);
+//     pulses queue per (gate, concrete type), ordered by (arrival, id);
+//   - the entity key is extracted from the pulse BODY via the TARGET gate's
+//     `entity_key` field (FA-derived flow frontmatter); bodiless or keyless
+//     pulses share key None — a keyless gate is the None-key special case;
+//   - a gate fires once per COMPLETE same-key window: one pulse per required
+//     input (earliest matching, subtype-aware), all sharing the key; complete
+//     windows drain in ascending (join_time, key) order; a retry (same type,
+//     same key, again) = a second window = a second firing — the guard's
+//     refusal path;
+//   - N=1 reduction: with ≤1 arrival per requirement, the RNG draw sequence
+//     (service → outcome → per-synapse hops, in topo-pass order) is identical
+//     to the single-admission engine, so seeded reports reproduce
+//     byte-identically — verified by the regress "Twin reduction" section;
+//     divergence on flows with same-type fan-in is a SURFACED FINDING, never
+//     silently absorbed;
+//   - causal ledger (--ledger <path>, JSONL): one record per pulse (parents,
+//     stimuli) and per firing (consumed → emitted); dynamic scenario claims
+//     become a DAG filter by entity key. twin_report.json is UNCHANGED.
+
+/// Per-gate-per-run firing cap: cycle containment. A flow cycle that
+/// regenerates its own inputs would otherwise fire forever. Loud on trip.
+const FIRE_CAP: u64 = 10_000;
+
+#[derive(Debug, Clone)]
+pub struct Pulse {
+    id: u64,
+    arrival: f64,
+    body: Option<Value>,
+    parents: Vec<u64>,   // consumed pulse ids of the firing that emitted this
+    stimuli: Vec<u64>,   // root pulse ids this pulse descends from
+    key: Option<String>, // entity key, per the TARGET gate's entity_key field
+}
+
+/// Causal ledger — append-only JSONL, one record per pulse delivery and per
+/// gate firing. Pulse/firing ids are per-run (records carry `run`).
+pub struct Ledger {
+    out: std::io::BufWriter<std::fs::File>,
+}
+
+impl Ledger {
+    fn open(path: &PathBuf) -> Result<Self> {
+        let f = std::fs::File::create(path)
+            .with_context(|| format!("creating ledger {:?}", path))?;
+        Ok(Ledger { out: std::io::BufWriter::new(f) })
+    }
+    fn pulse(&mut self, run: usize, to_gate: &str, pulse_type: &str, p: &Pulse) -> Result<()> {
+        use std::io::Write;
+        writeln!(self.out, "{}", json!({
+            "kind": "pulse", "run": run, "id": p.id, "type": pulse_type,
+            "to": to_gate, "arrival_ms": p.arrival, "parents": p.parents,
+            "stimuli": p.stimuli, "key": p.key,
+        }))?;
+        Ok(())
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn firing(&mut self, run: usize, firing_id: u64, gate: &str, key: &Option<String>,
+              t: f64, consumed: &[u64], outcome: Option<&str>, emitted: &[u64]) -> Result<()> {
+        use std::io::Write;
+        writeln!(self.out, "{}", json!({
+            "kind": "firing", "run": run, "id": firing_id, "gate": gate,
+            "key": key, "fire_ms": t, "consumed": consumed,
+            "outcome": outcome, "emitted": emitted,
+        }))?;
+        Ok(())
+    }
+    fn flush(&mut self) -> Result<()> {
+        use std::io::Write;
+        self.out.flush()?;
+        Ok(())
+    }
+}
+
+/// Entity key extraction: `field` names a body field; string/number/bool
+/// coerce to string. Missing body, missing field, or other value → None.
+fn extract_key(body: Option<&Value>, field: Option<&str>) -> Option<String> {
+    match (body, field) {
+        (Some(b), Some(f)) => match b.get(f) {
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Number(n)) => Some(n.to_string()),
+            Some(Value::Bool(x)) => Some(x.to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// queues[gate][concrete pulse_type] = pulses sorted by (arrival, id)
+type Queues = HashMap<String, HashMap<String, Vec<Pulse>>>;
+
+/// Deliver one pulse across a synapse: sample the hop, apply wire tamper,
+/// assign identity, extract the target gate's entity key, insert in
+/// (arrival, id) order. Returns the new pulse id.
+#[allow(clippy::too_many_arguments)]
+fn deliver(
+    queues: &mut Queues,
+    syn: &Synapse,
+    t_send: f64,
+    body: Option<&Value>,
+    parents: &[u64],
+    stimuli: &[u64],
+    entity_key_field: Option<&str>,
+    next_pulse: &mut u64,
+    lib: Option<&LatencyLib>,
+    rng: &mut StdRng,
+    tamper_sigs: bool,
+    ledger: &mut Option<Ledger>,
+    run_idx: usize,
+) -> Result<u64> {
+    let hop = match (lib, &syn.medium) {
+        (Some(l), Some(m)) => l.media.get(m).map_or(0.0, |d| d.sample(rng)),
+        _ => 0.0,
+    };
+    let mut stored = body.cloned();
+    // forge-on-the-wire: every signature crossing a synapse is corrupted —
+    // real verifiers downstream must visibly reject
+    if tamper_sigs {
+        if let Some(Value::Object(map)) = stored.as_mut() {
+            if map.contains_key("sig") {
+                map.insert("sig".into(), Value::String("f0f0f0f0deadbeef".into()));
+            }
+        }
+    }
+    *next_pulse += 1;
+    let id = *next_pulse;
+    // A root pulse (source-locus injection) is its own stimulus.
+    let stimuli: Vec<u64> = if stimuli.is_empty() { vec![id] } else { stimuli.to_vec() };
+    let p = Pulse {
+        id,
+        arrival: t_send + hop,
+        key: extract_key(stored.as_ref(), entity_key_field),
+        body: stored,
+        parents: parents.to_vec(),
+        stimuli,
+    };
+    if let Some(l) = ledger.as_mut() {
+        l.pulse(run_idx, &syn.to, &syn.pulse_type, &p)?;
+    }
+    let q = queues
+        .entry(syn.to.clone())
+        .or_default()
+        .entry(syn.pulse_type.clone())
+        .or_default();
+    let pos = q.partition_point(|x| (x.arrival, x.id) <= (p.arrival, p.id));
+    q.insert(pos, p);
+    Ok(id)
+}
+
+/// Find the EARLIEST complete window for `gate`: per required input, the
+/// earliest queued pulse (subtype-aware) sharing one entity key. Deterministic
+/// across HashMap orders: all selections are min-folds tie-broken on
+/// (arrival, pulse id), and the winning window is min over (join, key).
+/// Returns (key, join_time, consumed pulse ids).
+fn find_window(
+    topo: &Topology,
+    gate: &GateModel,
+    queues: &Queues,
+) -> Option<(Option<String>, f64, Vec<u64>)> {
+    let qmap = queues.get(&gate.name)?;
+    // Candidate keys: distinct keys among pulses of requirement-matching types.
+    let mut keys: std::collections::BTreeSet<Option<String>> = Default::default();
+    for (t, q) in qmap {
+        if gate.requires.iter().any(|r| topo.matches(t, r)) {
+            for p in q {
+                keys.insert(p.key.clone());
+            }
+        }
+    }
+    let mut best: Option<(f64, Option<String>, Vec<u64>)> = None;
+    for key in keys {
+        // Per requirement: earliest matching pulse carrying this key.
+        let mut per_req: Vec<Option<(f64, u64)>> = Vec::with_capacity(gate.requires.len());
+        for req in &gate.requires {
+            let mut found: Option<(f64, u64)> = None;
+            for (t, q) in qmap {
+                if !topo.matches(t, req) {
+                    continue;
+                }
+                if let Some(p) = q.iter().find(|p| p.key == key) {
+                    let cand = (p.arrival, p.id);
+                    if found.map_or(true, |f| cand < f) {
+                        found = Some(cand);
+                    }
+                }
+            }
+            per_req.push(found);
+        }
+        let mut present: Vec<(f64, u64)> = per_req.iter().filter_map(|x| *x).collect();
+        present.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // One pulse may satisfy two requirements (subtype fan-in) — consume
+        // it once (dedup) but count it per requirement, as the static prover
+        // and the old engine both did.
+        let window: Option<(f64, Vec<u64>)> = match gate.logic_op {
+            LogicOp::And => {
+                if present.len() == gate.requires.len() {
+                    let join = present.last().unwrap().0;
+                    let mut ids: Vec<u64> = present.iter().map(|x| x.1).collect();
+                    ids.sort_unstable();
+                    ids.dedup();
+                    Some((join, ids))
+                } else {
+                    None
+                }
+            }
+            LogicOp::Or => present.first().map(|&(t, id)| (t, vec![id])),
+            LogicOp::Threshold(n) => {
+                if present.len() >= n {
+                    let join = present[n - 1].0;
+                    let mut ids: Vec<u64> = present[..n].iter().map(|x| x.1).collect();
+                    ids.sort_unstable();
+                    ids.dedup();
+                    Some((join, ids))
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some((join, ids)) = window {
+            let better = match &best {
+                None => true,
+                Some((bj, bk, _)) => join < *bj || (join == *bj && key < *bk),
+            };
+            if better {
+                best = Some((join, key, ids));
+            }
+        }
+    }
+    best.map(|(j, k, ids)| (k, j, ids))
+}
 
 /// Run one Monte Carlo pass through the topology.
-/// Returns: gate_name → Option<fire_time_ms>
+/// Returns: gate_name → firing times (empty/absent = did not fire this run).
+#[allow(clippy::too_many_arguments)]
 fn run_once(
     topo: &Topology,
     rng: &mut StdRng,
     lib: Option<&LatencyLib>,
     services: &[(ServiceSource, Option<LogNormal>)],
     routes_out: &HashMap<String, Vec<usize>>, // from-node → synapse indices
+    entity_key_of: &HashMap<String, String>,  // gate → its entity_key body field
     subs: &mut Option<substitute::SubPool>,   // co-sim: real gate implementations
     provider: &mut Option<substitute::BodyProvider>, // CA payload generator
     run_idx: usize,
@@ -421,263 +662,245 @@ fn run_once(
     // that fires identically but DECIDES differently (tamper runs, 2026-07-06)
     outcome_counts: &mut HashMap<String, HashMap<String, u64>>,
     tamper_sigs: bool,
-) -> Result<HashMap<String, Option<f64>>> {
-    // pulse_avail[gate_name][concrete pulse_type] = (earliest arrival, body)
-    // body is Some(...) when the pulse was emitted by a substituted gate (real
-    // data); None means simulated origin — the body provider fills it lazily
-    // if a substituted gate consumes it.
-    let mut pulse_avail: HashMap<String, HashMap<String, (f64, Option<Value>)>> = HashMap::new();
+    ledger: &mut Option<Ledger>,
+) -> Result<HashMap<String, Vec<f64>>> {
+    let mut queues: Queues = HashMap::new();
+    let mut next_pulse: u64 = 0;
+    let mut next_firing: u64 = 0;
 
-    fn deliver(
-        avail: &mut HashMap<String, HashMap<String, (f64, Option<Value>)>>,
-        syn: &Synapse,
-        t_send: f64,
-        body: Option<&Value>,
-        lib: Option<&LatencyLib>,
-        rng: &mut StdRng,
-        tamper_sigs: bool,
-    ) {
-        let hop = match (lib, &syn.medium) {
-            (Some(l), Some(m)) => l.media.get(m).map_or(0.0, |d| d.sample(rng)),
-            _ => 0.0,
-        };
-        let entry = avail
-            .entry(syn.to.clone())
-            .or_default()
-            .entry(syn.pulse_type.clone())
-            .or_insert((f64::INFINITY, None));
-        let arrival = t_send + hop;
-        if arrival < entry.0 {
-            let mut stored = body.cloned();
-            // forge-on-the-wire: every signature crossing a synapse is
-            // corrupted — real verifiers downstream must visibly reject
-            if tamper_sigs {
-                if let Some(Value::Object(map)) = stored.as_mut() {
-                    if map.contains_key("sig") {
-                        map.insert("sig".into(),
-                                   Value::String("f0f0f0f0deadbeef".into()));
-                    }
-                }
-            }
-            *entry = (arrival, stored);
-        }
-    }
-
-    // Inject from source loci at t = 0
+    // Inject from source loci at t = 0 (root pulses: their own stimuli)
     for locus in &topo.source_loci {
         if let Some(idxs) = routes_out.get(locus) {
             for &i in idxs {
-                deliver(&mut pulse_avail, &topo.synapses[i], 0.0, None, lib, rng, tamper_sigs);
+                let key_field = entity_key_of.get(&topo.synapses[i].to).map(|s| s.as_str());
+                deliver(&mut queues, &topo.synapses[i], 0.0, None, &[], &[], key_field,
+                        &mut next_pulse, lib, rng, tamper_sigs, ledger, run_idx)?;
             }
         }
     }
 
-    let mut fire_times: HashMap<String, Option<f64>> = HashMap::new();
+    let mut firings: HashMap<String, Vec<f64>> = HashMap::new();
+    let mut fire_count: Vec<u64> = vec![0; topo.gates.len()];
 
     // Iterate to a fixed point: a single topological pass starves gates inside
-    // requires-cycles (a cycle member evaluated before its in-cycle supplier
-    // never sees the pulse). Each gate still fires AT MOST ONCE per admission —
-    // repeat passes only give not-yet-fired gates another look as pulses
-    // propagate around cycles. Bounded by gate count (each extra pass must
-    // fire ≥1 new gate to continue).
+    // requires-cycles. Each pass, every gate drains ALL its complete windows;
+    // extra passes only matter while new pulses propagate around cycles.
     let mut passes = 0;
     loop {
         let mut newly_fired = false;
         passes += 1;
 
-    for &idx in &topo.topo_order {
-        let gate = &topo.gates[idx];
-        if matches!(fire_times.get(&gate.name), Some(Some(_))) {
-            continue; // already fired this admission
-        }
-        let avail = pulse_avail.get(&gate.name).cloned();
+        for &idx in &topo.topo_order {
+            let gate = &topo.gates[idx];
 
-        // Per requirement: earliest arrived concrete type that satisfies it
-        // (subtype-aware). None if nothing satisfying arrived.
-        let arrivals: Vec<Option<f64>> = gate
-            .requires
-            .iter()
-            .map(|req| {
-                avail.as_ref().and_then(|a| {
-                    a.iter()
-                        .filter(|(t, _)| topo.matches(t, req))
-                        .map(|(_, &(time, _))| time)
-                        .fold(None, |acc: Option<f64>, t| Some(acc.map_or(t, |x: f64| x.min(t))))
-                })
-            })
-            .collect();
-
-        let mut present: Vec<f64> = arrivals.iter().filter_map(|x| *x).collect();
-        present.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-        let join: Option<f64> = if gate.requires.is_empty() {
-            Some(0.0) // autonomous — fires at service time
-        } else {
-            match gate.logic_op {
-                LogicOp::And => {
-                    if present.len() == gate.requires.len() {
-                        present.last().copied() // latest of all required
-                    } else {
-                        None
-                    }
-                }
-                LogicOp::Or => present.first().copied(), // earliest satisfier
-                LogicOp::Threshold(n) => {
-                    if present.len() >= n {
-                        Some(present[n - 1]) // n-th earliest
-                    } else {
-                        None
-                    }
-                }
-            }
-        };
-
-        let join_time = match join {
-            Some(t) => t,
-            None => {
-                fire_times.insert(gate.name.clone(), None); // may still fire a later pass
-                continue;
-            }
-        };
-        newly_fired = true;
-
-        // ── Substituted gate: real decision logic replaces both the service
-        //    sample AND the outcome draw ─────────────────────────────────────
-        let substituted = subs.as_ref().map_or(false, |p| p.is_substituted(&gate.name));
-        if substituted {
-            let mut inputs: Vec<substitute::InputPulse> = Vec::new();
-            if let Some(a) = avail.as_ref() {
-                for (t, (time, body)) in a.iter() {
-                    if *time <= join_time
-                        && gate.requires.iter().any(|req| topo.matches(t, req))
-                    {
-                        // Real body if the upstream was substituted; otherwise
-                        // ask CA's body provider to synthesize one.
-                        let body = match (body, provider.as_mut()) {
-                            (Some(b), _) => b.clone(),
-                            (None, Some(p)) => p.body_for(run_idx, t, *time, &gate.name)?,
-                            (None, None) => Value::Null,
-                        };
-                        inputs.push(substitute::InputPulse {
-                            pulse_type: t.clone(),
-                            arrival_ms: *time,
-                            body,
-                        });
-                    }
-                }
-            }
-
-            let resp = subs
-                .as_mut()
-                .unwrap()
-                .call(&gate.name, run_idx, join_time, &inputs)?;
-
-            let fire_time = join_time + resp.service_ms;
-            fire_times.insert(gate.name.clone(), Some(fire_time));
-
-            if !gate.outcomes.is_empty() {
-                let outcome_name = resp.outcome.as_deref().with_context(|| {
-                    format!(
-                        "substituted gate '{}' has declared outcomes but returned none",
-                        gate.name
-                    )
-                })?;
-                let chosen = gate
-                    .outcomes
-                    .iter()
-                    .find(|o| o.name.as_deref() == Some(outcome_name))
-                    .with_context(|| {
-                        format!(
-                            "substituted gate '{}' returned undeclared outcome '{}' (declared: {:?})",
-                            gate.name,
-                            outcome_name,
-                            gate.outcomes.iter().filter_map(|o| o.name.as_deref()).collect::<Vec<_>>()
-                        )
-                    })?;
-                *outcome_counts
-                    .entry(gate.name.clone())
-                    .or_default()
-                    .entry(outcome_name.to_string())
-                    .or_insert(0) += 1;
-                // Contract check: actual outputs ⊆ the chosen outcome's declared flows
-                for out in &resp.outputs {
-                    if !chosen.flows.iter().any(|f| f == &out.pulse_type) {
-                        anyhow::bail!(
-                            "substituted gate '{}' emitted '{}' not declared under outcome '{}' (flows: {:?})",
-                            gate.name, out.pulse_type, outcome_name, chosen.flows
-                        );
-                    }
-                }
-                // Propagate what the real code actually emitted (with its real
-                // body); if it returned no outputs, fall back to declared flows
-                // with no body.
-                let emitted: Vec<(&String, Option<&Value>)> = if resp.outputs.is_empty() {
-                    chosen.flows.iter().map(|f| (f, None)).collect()
+            loop {
+                // Autonomous gates (no required inputs) fire exactly once per
+                // run at t=0 — unchanged from the single-admission engine.
+                let win: Option<(Option<String>, f64, Vec<u64>)> = if gate.requires.is_empty() {
+                    if fire_count[idx] == 0 { Some((None, 0.0, vec![])) } else { None }
                 } else {
-                    resp.outputs.iter().map(|o| (&o.pulse_type, Some(&o.body))).collect()
+                    find_window(topo, gate, &queues)
                 };
-                for (pulse_type, body) in emitted {
-                    if let Some(idxs) = routes_out.get(&gate.name) {
-                        for &i in idxs {
-                            if &topo.synapses[i].pulse_type == pulse_type {
-                                deliver(&mut pulse_avail, &topo.synapses[i], fire_time, body, lib, rng, tamper_sigs);
+                let Some((key, join_time, consumed_ids)) = win else { break };
+
+                if fire_count[idx] >= FIRE_CAP {
+                    eprintln!(
+                        "[twin] LOUD: gate '{}' hit FIRE_CAP={} in run {} — \
+                         self-regenerating cycle? containment engaged, windows dropped",
+                        gate.name, FIRE_CAP, run_idx
+                    );
+                    break;
+                }
+
+                // Consume the window's pulses (clone out, remove from queues).
+                let mut consumed: Vec<(String, Pulse)> = Vec::new();
+                if let Some(qm) = queues.get_mut(&gate.name) {
+                    for (t, q) in qm.iter_mut() {
+                        let mut i = 0;
+                        while i < q.len() {
+                            if consumed_ids.contains(&q[i].id) {
+                                consumed.push((t.clone(), q.remove(i)));
+                            } else {
+                                i += 1;
                             }
                         }
                     }
                 }
-            }
-            continue;
-        }
+                consumed.sort_by(|a, b| {
+                    (a.1.arrival, a.1.id).partial_cmp(&(b.1.arrival, b.1.id)).unwrap()
+                });
 
-        let (source, dist) = services[idx];
-        let service: f64 = match (source, dist) {
-            (ServiceSource::LegacyUniform, _) => {
-                if gate.refractory_ms < gate.window_ms {
-                    rng.gen_range(gate.refractory_ms..gate.window_ms)
-                } else {
-                    gate.window_ms
+                fire_count[idx] += 1;
+                next_firing += 1;
+                newly_fired = true;
+
+                let parent_ids: Vec<u64> = consumed.iter().map(|(_, p)| p.id).collect();
+                let mut stimuli: Vec<u64> =
+                    consumed.iter().flat_map(|(_, p)| p.stimuli.clone()).collect();
+                stimuli.sort_unstable();
+                stimuli.dedup();
+
+                // ── Substituted gate: real decision logic replaces both the
+                //    service sample AND the outcome draw ─────────────────────
+                let substituted = subs.as_ref().map_or(false, |p| p.is_substituted(&gate.name));
+                if substituted {
+                    let mut inputs: Vec<substitute::InputPulse> = Vec::new();
+                    for (t, p) in &consumed {
+                        // Real body if the upstream was substituted; otherwise
+                        // ask CA's body provider to synthesize one.
+                        let body = match (&p.body, provider.as_mut()) {
+                            (Some(b), _) => b.clone(),
+                            (None, Some(pr)) => pr.body_for(run_idx, t, p.arrival, &gate.name)?,
+                            (None, None) => Value::Null,
+                        };
+                        inputs.push(substitute::InputPulse {
+                            pulse_type: t.clone(),
+                            arrival_ms: p.arrival,
+                            body,
+                        });
+                    }
+
+                    let resp = subs
+                        .as_mut()
+                        .unwrap()
+                        .call(&gate.name, run_idx, join_time, &inputs)?;
+
+                    let fire_time = join_time + resp.service_ms;
+                    firings.entry(gate.name.clone()).or_default().push(fire_time);
+
+                    let mut emitted_ids: Vec<u64> = Vec::new();
+                    let mut outcome_label: Option<String> = None;
+                    if !gate.outcomes.is_empty() {
+                        let outcome_name = resp.outcome.as_deref().with_context(|| {
+                            format!(
+                                "substituted gate '{}' has declared outcomes but returned none",
+                                gate.name
+                            )
+                        })?;
+                        let chosen = gate
+                            .outcomes
+                            .iter()
+                            .find(|o| o.name.as_deref() == Some(outcome_name))
+                            .with_context(|| {
+                                format!(
+                                    "substituted gate '{}' returned undeclared outcome '{}' (declared: {:?})",
+                                    gate.name,
+                                    outcome_name,
+                                    gate.outcomes.iter().filter_map(|o| o.name.as_deref()).collect::<Vec<_>>()
+                                )
+                            })?;
+                        *outcome_counts
+                            .entry(gate.name.clone())
+                            .or_default()
+                            .entry(outcome_name.to_string())
+                            .or_insert(0) += 1;
+                        outcome_label = Some(outcome_name.to_string());
+                        // Contract check: actual outputs ⊆ chosen outcome's declared flows
+                        for out in &resp.outputs {
+                            if !chosen.flows.iter().any(|f| f == &out.pulse_type) {
+                                anyhow::bail!(
+                                    "substituted gate '{}' emitted '{}' not declared under outcome '{}' (flows: {:?})",
+                                    gate.name, out.pulse_type, outcome_name, chosen.flows
+                                );
+                            }
+                        }
+                        // Propagate what the real code actually emitted (with
+                        // its real body); if it returned no outputs, fall back
+                        // to declared flows with no body.
+                        let emitted: Vec<(&String, Option<&Value>)> = if resp.outputs.is_empty() {
+                            chosen.flows.iter().map(|f| (f, None)).collect()
+                        } else {
+                            resp.outputs.iter().map(|o| (&o.pulse_type, Some(&o.body))).collect()
+                        };
+                        for (pulse_type, body) in emitted {
+                            if let Some(idxs) = routes_out.get(&gate.name) {
+                                for &i in idxs {
+                                    if &topo.synapses[i].pulse_type == pulse_type {
+                                        let key_field = entity_key_of
+                                            .get(&topo.synapses[i].to)
+                                            .map(|s| s.as_str());
+                                        let pid = deliver(&mut queues, &topo.synapses[i], fire_time,
+                                                          body, &parent_ids, &stimuli, key_field,
+                                                          &mut next_pulse, lib, rng, tamper_sigs,
+                                                          ledger, run_idx)?;
+                                        emitted_ids.push(pid);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let Some(l) = ledger.as_mut() {
+                        l.firing(run_idx, next_firing, &gate.name, &key, fire_time,
+                                 &parent_ids, outcome_label.as_deref(), &emitted_ids)?;
+                    }
+                    continue;
                 }
-            }
-            (_, Some(d)) => d.sample(rng),
-            _ => 0.0,
-        };
-        let fire_time = join_time + service;
-        fire_times.insert(gate.name.clone(), Some(fire_time));
 
-        // Choose outcome (normalised weights → cumulative draw)
-        if gate.outcomes.is_empty() {
-            continue;
-        }
-        let r: f64 = rng.gen_range(0.0..1.0);
-        let mut cum = 0.0;
-        let chosen = gate.outcomes.iter().find(|o| {
-            cum += o.weight;
-            r < cum
-        }).unwrap_or(&gate.outcomes[gate.outcomes.len() - 1]);
-        *outcome_counts
-            .entry(gate.name.clone())
-            .or_default()
-            .entry(chosen.name.clone().unwrap_or_else(|| "_unnamed".into()))
-            .or_insert(0) += 1;
+                let (source, dist) = services[idx];
+                let service: f64 = match (source, dist) {
+                    (ServiceSource::LegacyUniform, _) => {
+                        if gate.refractory_ms < gate.window_ms {
+                            rng.gen_range(gate.refractory_ms..gate.window_ms)
+                        } else {
+                            gate.window_ms
+                        }
+                    }
+                    (_, Some(d)) => d.sample(rng),
+                    _ => 0.0,
+                };
+                let fire_time = join_time + service;
+                firings.entry(gate.name.clone()).or_default().push(fire_time);
 
-        // Propagate emitted pulses downstream (with per-synapse medium latency)
-        for pulse_type in &chosen.flows {
-            if let Some(idxs) = routes_out.get(&gate.name) {
-                for &i in idxs {
-                    if &topo.synapses[i].pulse_type == pulse_type {
-                        deliver(&mut pulse_avail, &topo.synapses[i], fire_time, None, lib, rng, tamper_sigs);
+                // Choose outcome (normalised weights → cumulative draw)
+                if gate.outcomes.is_empty() {
+                    if let Some(l) = ledger.as_mut() {
+                        l.firing(run_idx, next_firing, &gate.name, &key, fire_time,
+                                 &parent_ids, None, &[])?;
+                    }
+                    continue;
+                }
+                let r: f64 = rng.gen_range(0.0..1.0);
+                let mut cum = 0.0;
+                let chosen = gate.outcomes.iter().find(|o| {
+                    cum += o.weight;
+                    r < cum
+                }).unwrap_or(&gate.outcomes[gate.outcomes.len() - 1]);
+                *outcome_counts
+                    .entry(gate.name.clone())
+                    .or_default()
+                    .entry(chosen.name.clone().unwrap_or_else(|| "_unnamed".into()))
+                    .or_insert(0) += 1;
+
+                // Propagate emitted pulses downstream (per-synapse medium latency)
+                let mut emitted_ids: Vec<u64> = Vec::new();
+                for pulse_type in &chosen.flows {
+                    if let Some(idxs) = routes_out.get(&gate.name) {
+                        for &i in idxs {
+                            if &topo.synapses[i].pulse_type == pulse_type {
+                                let key_field = entity_key_of
+                                    .get(&topo.synapses[i].to)
+                                    .map(|s| s.as_str());
+                                let pid = deliver(&mut queues, &topo.synapses[i], fire_time, None,
+                                                  &parent_ids, &stimuli, key_field, &mut next_pulse,
+                                                  lib, rng, tamper_sigs, ledger, run_idx)?;
+                                emitted_ids.push(pid);
+                            }
+                        }
                     }
                 }
+                if let Some(l) = ledger.as_mut() {
+                    l.firing(run_idx, next_firing, &gate.name, &key, fire_time, &parent_ids,
+                             chosen.name.as_deref(), &emitted_ids)?;
+                }
             }
         }
-    }
 
         if !newly_fired || passes > topo.gates.len() {
             break;
         }
     }
 
-    Ok(fire_times)
+    Ok(firings)
 }
 
 // ── Statistics ─────────────────────────────────────────────────────────────────
@@ -766,20 +989,43 @@ fn main() -> Result<()> {
     for (i, s) in topo.synapses.iter().enumerate() {
         routes_out.entry(s.from.clone()).or_default().push(i);
     }
+    // gate → its declared entity_key body field (multi-admission windows)
+    let entity_key_of: HashMap<String, String> = topo
+        .gates
+        .iter()
+        .filter_map(|g| g.entity_key.as_ref().map(|k| (g.name.clone(), k.clone())))
+        .collect();
+    if !entity_key_of.is_empty() {
+        eprintln!("[twin] {} entity-keyed gate(s)", entity_key_of.len());
+    }
 
-    // Accumulate per-gate fire times across all runs
+    let mut ledger: Option<Ledger> = match &cfg.ledger_path {
+        Some(p) => Some(Ledger::open(p)?),
+        None => None,
+    };
+
+    // Accumulate per-gate fire times across all runs. A gate may fire more
+    // than once per run (multi-admission); fire% counts runs with ≥1 firing.
     let mut gate_times: HashMap<String, Vec<f64>> = HashMap::new();
+    let mut gate_runs_fired: HashMap<String, usize> = HashMap::new();
     let mut gate_miss:  HashMap<String, usize>    = HashMap::new();
     let mut outcome_counts: HashMap<String, HashMap<String, u64>> = HashMap::new();
 
     for run_idx in 0..cfg.runs {
-        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &mut subs, &mut provider, run_idx, &mut outcome_counts, cfg.tamper_sigs)?;
-        for (gate, ft) in result {
-            match ft {
-                Some(t) => gate_times.entry(gate).or_default().push(t),
-                None    => *gate_miss.entry(gate).or_default() += 1,
+        let result = run_once(&topo, &mut rng, lib.as_ref(), &services, &routes_out, &entity_key_of, &mut subs, &mut provider, run_idx, &mut outcome_counts, cfg.tamper_sigs, &mut ledger)?;
+        for g in &topo.gates {
+            match result.get(&g.name) {
+                Some(v) if !v.is_empty() => {
+                    gate_times.entry(g.name.clone()).or_default().extend_from_slice(v);
+                    *gate_runs_fired.entry(g.name.clone()).or_default() += 1;
+                }
+                _ => *gate_miss.entry(g.name.clone()).or_default() += 1,
             }
         }
+    }
+    if let Some(l) = ledger.as_mut() {
+        l.flush()?;
+        eprintln!("[ledger] wrote {:?}", cfg.ledger_path.as_ref().unwrap());
     }
 
     // Sort and compute stats for each gate
@@ -801,7 +1047,8 @@ fn main() -> Result<()> {
         .map(|(i, gate)| {
             let mut times = gate_times.get(&gate.name).cloned().unwrap_or_default();
             let misses = gate_miss.get(&gate.name).copied().unwrap_or(0);
-            let fired  = times.len();
+            // runs with ≥1 firing — NOT total firings (multi-admission)
+            let fired  = gate_runs_fired.get(&gate.name).copied().unwrap_or(0);
             let total  = fired + misses;
             times.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let mean     = if fired > 0 { times.iter().sum::<f64>() / fired as f64 } else { 0.0 };
@@ -933,6 +1180,7 @@ struct Config {
     diagnose_dir:       Option<PathBuf>,
     latencies_path:     Option<PathBuf>,
     report_path:        Option<PathBuf>,
+    ledger_path:        Option<PathBuf>,  // causal ledger JSONL (2026-07-14)
     substitutions_path: Option<PathBuf>,
     // forge-on-the-wire (2026-07-06): corrupt every `sig` field as bodies
     // cross synapses. Provider-side tampering can't forge against a REAL
@@ -949,6 +1197,7 @@ impl Config {
         let mut diagnose_dir   = None;
         let mut latencies_path = None;
         let mut report_path    = None;
+        let mut ledger_path    = None;
 
         let mut substitutions_path = None;
         let mut tamper_sigs = false;
@@ -961,6 +1210,7 @@ impl Config {
                 "--diagnose"      => { diagnose_dir       = Some(PathBuf::from(&args[i + 1])); i += 2; }
                 "--latencies"     => { latencies_path     = Some(PathBuf::from(&args[i + 1])); i += 2; }
                 "--report"        => { report_path        = Some(PathBuf::from(&args[i + 1])); i += 2; }
+                "--ledger"        => { ledger_path        = Some(PathBuf::from(&args[i + 1])); i += 2; }
                 "--substitutions" => { substitutions_path = Some(PathBuf::from(&args[i + 1])); i += 2; }
                 "--tamper-sigs"   => { tamper_sigs        = true; i += 1; }
                 other             => anyhow::bail!("unknown argument: {other}"),
@@ -968,6 +1218,6 @@ impl Config {
         }
 
         let spec_path = spec_path.context("--spec <flow.json> is required")?;
-        Ok(Config { spec_path, runs, seed, diagnose_dir, latencies_path, report_path, substitutions_path, tamper_sigs })
+        Ok(Config { spec_path, runs, seed, diagnose_dir, latencies_path, report_path, ledger_path, substitutions_path, tamper_sigs })
     }
 }

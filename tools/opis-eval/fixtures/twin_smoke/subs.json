@@ -1,0 +1,1 @@
+{"gates": {"EmitterA": {"cmd": ["/tmp/smoke/impl.py"]}, "EmitterB": {"cmd": ["/tmp/smoke/impl.py"]}}}

@@ -288,6 +288,71 @@ def main() -> None:
     if n_scen == 0:
         print(info("no confirmed scenarios found — nothing to verify"))
 
+    # Twin reduction (2026-07-14, multi-admission design): the multi-admission
+    # engine must reproduce single-admission-era seeded reports BYTE-IDENTICALLY
+    # on flows with at most one arrival per requirement (N=1 reduction — one
+    # semantics, no mode flag). Fixtures are pinned by sha256; fixture tamper
+    # or a report mismatch = regression. No twin binary on this machine =
+    # honest SKIP (warning), never silent green. NOTE: a stale binary can pass
+    # this section — rebuild da-twin after touching its source.
+    print(hdr("Twin reduction (N=1 must reproduce pinned reports byte-identically)"))
+    import hashlib as _hashlib
+    import os as _os
+    import tempfile as _tempfile
+    fixtures_dir = HERE / "fixtures" / "twin_reduction"
+    manifest_path = fixtures_dir / "manifest.json"
+    twin_bin = None
+    for cand in ([Path(_os.environ["DA_TWIN"])] if _os.environ.get("DA_TWIN") else []) + [
+        REPO_ROOT / "agents" / "target" / "release" / "da-twin",
+        REPO_ROOT / "agents" / "crates" / "da-twin" / "target" / "release" / "da-twin",
+    ]:
+        if cand.is_file() and _os.access(cand, _os.X_OK):
+            twin_bin = cand
+            break
+    if not manifest_path.is_file():
+        print(warn("no reduction fixtures found — nothing to verify"))
+    elif twin_bin is None:
+        print(warn("da-twin binary not found (set DA_TWIN or build "
+                   "agents/crates/da-twin) — reduction NOT verified this run"))
+    else:
+        manifest = _json.loads(manifest_path.read_text())
+        for entry in manifest.get("entries", []):
+            label = entry["fixture"]
+            fixture = fixtures_dir / entry["fixture"]
+            flow = output_dir / entry["flow"]
+            if not fixture.is_file() or not flow.is_file():
+                total_regressions += 1
+                print(err(f"{label}: fixture or flow file missing"))
+                continue
+            fixture_bytes = fixture.read_bytes()
+            if _hashlib.sha256(fixture_bytes).hexdigest() != entry["sha256"]:
+                total_regressions += 1
+                print(err(f"{label}: fixture bytes do not match pinned sha256 "
+                          f"— fixture tampered or edited without re-pin"))
+                continue
+            with _tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+                tmp_report = Path(tf.name)
+            try:
+                cmd = [str(twin_bin), "--spec", str(flow),
+                       "--runs", str(entry["runs"]), "--seed", str(entry["seed"]),
+                       "--report", str(tmp_report)]
+                if entry.get("tamper_sigs"):
+                    cmd.append("--tamper-sigs")
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                if r.returncode != 0:
+                    total_regressions += 1
+                    print(err(f"{label}: twin run failed — {r.stderr.strip()[:200]}"))
+                elif tmp_report.read_bytes() == fixture_bytes:
+                    print(ok(f"{label}: byte-identical "
+                             f"(seed {entry['seed']}, {entry['runs']} runs"
+                             f"{', tamper' if entry.get('tamper_sigs') else ''})"))
+                else:
+                    total_regressions += 1
+                    print(err(f"{label}: report DIVERGES from pinned "
+                              f"single-admission-era bytes — N=1 reduction broken"))
+            finally:
+                tmp_report.unlink(missing_ok=True)
+
     # ADVISORY: prose-exceeds-slots lint over the current library. Heuristic
     # warnings only — NEVER counted as regressions (4/4 CA falsifications to
     # date were this class; the lint shifts it left of CA, but a heuristic

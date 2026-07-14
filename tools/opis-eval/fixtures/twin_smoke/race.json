@@ -1,0 +1,14 @@
+{
+  "loci": {"A": {"source": true}, "B": {"source": true}},
+  "gates": {
+    "Racer": {"requires": ["req"], "window_ms": 100, "refractory_ms": 10,
+              "emits": [{"outcome": "done", "flows": ["done_evt"], "weight": 1}]},
+    "Down":  {"requires": ["done_evt"], "window_ms": 100, "refractory_ms": 10,
+              "emits": [{"outcome": "noted", "flows": [], "weight": 1}]}
+  },
+  "synapses": [
+    {"from": "A", "to": "Racer", "pulse_type": "req"},
+    {"from": "B", "to": "Racer", "pulse_type": "req"},
+    {"from": "Racer", "to": "Down", "pulse_type": "done_evt"}
+  ]
+}

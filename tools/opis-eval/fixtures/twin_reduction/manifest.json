@@ -1,0 +1,29 @@
+{
+  "_comment": "Twin reduction fixtures (2026-07-14, multi-admission design): seeded single-admission-era reports the multi-admission engine must reproduce BYTE-IDENTICALLY (N=1 reduction \u2014 silicon v4 has at most one arrival per requirement). Regenerate ONLY by explicit decision; a mismatch is a semantics regression.",
+  "entries": [
+    {
+      "flow": "silicon_sandwiches/flow/flow_v4.json",
+      "seed": 42,
+      "runs": 1000,
+      "tamper_sigs": false,
+      "fixture": "silicon_v4_seed42_runs1000.json",
+      "sha256": "ab667ad92b1b3a1af44d49270f4814fa9cd4ea1e9ed8099512818c2a9cbfc17f"
+    },
+    {
+      "flow": "silicon_sandwiches/flow/flow_v4.json",
+      "seed": 42,
+      "runs": 1000,
+      "tamper_sigs": true,
+      "fixture": "silicon_v4_seed42_runs1000_tamper.json",
+      "sha256": "ab667ad92b1b3a1af44d49270f4814fa9cd4ea1e9ed8099512818c2a9cbfc17f"
+    },
+    {
+      "flow": "silicon_sandwiches/flow/flow_v4.json",
+      "seed": 7,
+      "runs": 500,
+      "tamper_sigs": false,
+      "fixture": "silicon_v4_seed7_runs500.json",
+      "sha256": "f3839db18fd475b228bb228bc08354e3959157ee71e4c3fc80beb41f32ea1fc7"
+    }
+  ]
+}
