@@ -8,15 +8,77 @@ Most "AI architect" tooling ends at generation: the model emits a diagram or a d
 
 > **Conceptual foundation:** Opis is one concrete answer to the argument in [*AI Coding Design Patterns?*](https://zarkob.substack.com/p/ai-coding-design-patterns) — that as AI moves code creation to the requirements level, we validate agent-built systems either with an *LLM-as-judge* (easy to iterate, unreliable) or with a *DSL/ontology whose evaluation is constructed via graph algorithms* (harder to build, reliable to reason with in code). **Opis is a deliberate bet on the ontology branch:** the pulse-network is the ontology, and `opis-proof`'s fixed-point reachability with real witness paths is that graph-algorithm evaluation, made concrete.
 
-### The bigger arc: two loops and an instrument
+## Opis Architecture
 
-A flow is only the top level. The full system Opis is building toward is **two nested, self-closing verification loops**, plus an instrument that grounds them:
+Opis represents a target architecture as a well-defined hierarchy of four description layers, each more concrete than the one above it:
 
-- **FA — Flow Architect** *(built)* — the topology loop. Designs the flow-level pulse network; verified by `opis-eval` + `opis-proof`.
-- **GA — Gate Architect** *(next)* — the contract loop, and the one that tightens the Opis description itself. GA owns the gate library: it designs and verifies each gate's internals, validates timing against the Monte-Carlo twin, and promotes or demotes contracts as evidence accumulates. Every gate contract has exactly one owner — GA.
-- **CA — Coding Agent** *(next)* — not a peer loop but the **dev lead** serving GA: flow-scoped, not gate-scoped, because measured behavior is a reaction of the whole system — per-gate PDs don't compose (one validator's decision logic changes every distribution downstream of it). CA translates gates + ADRs into shared per-archetype message schemas (a contract that can't be translated into usable messages is falsified before any code runs), implements gates against them, emulates non-software subsystems statistically, and runs the flow in the co-simulation twin: real code where code will exist, statistics where the world is. Sandbox measurements *falsify* contracts confidently but *validate* them only weakly — lower bounds, never production numbers.
+1. **Flow** — the top level of abstraction. A flow contains:
+   - a domain-specific taxonomy of terms (archetypes extending computing-level slot types),
+   - the network topology: loci wired through custom or predefined operators called *gates*, which consume and produce typed *signals* (pulses) over synapses, and
+   - the binding map from domain-specific signal names to the gates' generic slot-type terminology.
+2. **Gates** — the operators the flow is wired from. A gate contract outlines one operation (validating an order, authorizing a payment) as typed input/output slots, join logic, timing windows, and outcome bundles. Gates are kata-agnostic, versioned, and pinned by every flow that uses them — a shared library, not per-kata artifacts.
+3. **Simulation** — the executable twin of a flow: Monte-Carlo dynamics over the topology, statistical emulation of everything that isn't software, and progressive substitution of real gate code (co-simulation). One simulation per flow; it validates the flow's dynamics and prices its timing.
+4. **Implementation** — real code in a real environment: gates compiled to wasm, message schemas on the wire, environment documents describing the infrastructure. One flow × n environments = n implementations; measured parameters feed back into the simulation.
 
-The loops *compose and feed back*: CA evidence that falsifies a contract demotes the gate, which invalidates any flow that relied on it — and that signal propagates back up so the responsible agent re-designs, not a human. Closing that path end-to-end is the actual research contribution. FA and its verification stack stand on their own and are fully working; GA is what turns the separate checkers into one coherent, self-correcting system.
+Two agents own the four layers, with the User as the only decision authority:
+
+- **FA — Flow Architect** owns layers 1–2. It designs flows and, when a kata needs a primitive that doesn't exist, proposes or amends gate contracts — always through **ADRs** the User decides.
+- **CA — Coding Agent** owns layers 3–4. It translates contracts into message schemas, builds and runs the simulation, implements gates as real code, and measures. Design decisions at the implementation layer travel through **DDRs**.
+
+Escalation is structural: evidence from a lower layer can falsify the layer above it — a contract that can't be translated into usable messages, a simulation that starves a gate, an implementation that contradicts the simulation. The fix happens at the layer that owns the problem, not by patching downstream.
+
+### The Reasoning Loop
+
+```mermaid
+flowchart TD
+    u[User] -- kata --> S
+    S[Start loop] --> f1
+
+    subgraph FA [FA — Flow Architect · layers 1–2: flow & gates]
+        f1[Build flow] --> f2{Complete?}
+        f2 -- problem --> f3[Prepare ADR]
+        f2 -- ok --> f5{Validate}
+        f4[Update context]
+    end
+
+    subgraph CAsim [CA — Coding Agent · layer 3: simulation]
+        c1{Build simulation} -- ok --> c2[Run simulation]
+        c2 --> c3{Problems found?}
+    end
+
+    subgraph CAimpl [CA — Coding Agent · layer 4: implementation]
+        i1[Read environment doc] --> i2[Build implementation]
+        i2 --> i3{Complete?}
+        i3 -- blocked --> i4[Prepare DDR]
+    end
+
+    f2 -- failed < N times --> S
+    f2 -- failed N times --> u
+    f3 -- ADR --> u
+    u -- decision --> f4
+    f4 --> S
+    f5 -- failed --> S
+    f5 -- valid --> c1
+    c1 -- failed --> S
+    c3 -- problems --> S
+    c3 -- ok, flow only --> E[Done]
+    c3 -- ok, implement --> i1
+    i3 -- done --> E
+    i4 -- DDR --> u
+    u -- decision --> i1
+```
+
+Both decision channels terminate at the User: **ADRs** carry flow- and gate-layer trade-offs (FA), **DDRs** carry implementation-layer ones (CA). Every decision becomes binding context injected into all subsequent iterations — rejections included.
+
+
+### The bigger arc: two agent loops and an outer loop
+
+A flow is only the top layer. The full system Opis is building toward is **two nested, self-closing verification loops** over the four layers:
+
+- **FA — Flow Architect** *(built)* — owns layers 1–2. Designs the flow-level pulse network and stewards the gate library it draws from; verified by `opis-eval` + `opis-proof`; every contract proposal or amendment is an ADR the User decides.
+- **CA — Coding Agent** *(in progress)* — owns layers 3–4. Flow-scoped, not gate-scoped, because measured behavior is a reaction of the whole system — per-gate PDs don't compose (one validator's decision logic changes every distribution downstream of it). CA translates gates + ADRs into shared per-archetype message schemas (a contract that can't be translated into usable messages is falsified before any code runs), implements gates against them, emulates non-software subsystems statistically, and runs the flow in the co-simulation twin: real code where code will exist, statistics where the world is. Sandbox measurements *falsify* contracts confidently but *validate* them only weakly — lower bounds, never production numbers.
+
+The loops *compose and feed back*: CA evidence that falsifies a contract reopens the gate's ADR, which invalidates any flow that pinned it — and that signal propagates back up so the responsible agent re-designs, not a human. Closing that path end-to-end is the actual research contribution. FA and its verification stack stand on their own and are fully working; the feedback path is what turns the separate checkers into one coherent, self-correcting system.
 
 Encircling it all is an outer loop that closes differently: **real-use feedback.** The inner loops shift *correctness* left — they settle valid, safe, and efficient before a line runs. But *useful* can only be judged once the system meets real participants, and that judgment doesn't return a pass/fail, it returns a **revision.** Observed usage sends a signal all the way back out: sometimes the architecture was wrong for the right problem (regenerate the flow), sometimes the problem itself was wrong (rewrite the kata — the requirements "code"). This is the loop that makes the requirements themselves editable, not just the design beneath them, and it's the one no graph algorithm can close on its own.
 
@@ -127,6 +189,12 @@ A contract is **promoted only with evidence** — grounding in real-life archite
 
 ---
 
+## Architect UI Sample
+
+![UI](./opis_ui.png)
+
+---
+
 ## Repo layout
 
 ```
@@ -144,11 +212,11 @@ tools/
 
 ## Status & roadmap
 
-This is an active research prototype, not a product — see [the bigger arc](#the-bigger-arc-two-loops-and-an-instrument) for the full vision.
+This is an active research prototype, not a product — see [the bigger arc](#the-bigger-arc-two-agent-loops-and-an-outer-loop) for the full vision.
 
 - **Built and working:** the pulse-network model, the `opis-eval` / `opis-proof` / `opis-regress` verification stack, the Rust Monte-Carlo **twin** (`da-twin` + `twin_check`: subtype- and logic-aware simulation, latency library, advisory timing norms), and **FA** — the flow-level loop, closed end-to-end.
 - **Seed stock, being refined:** the gate library — 14 draft contracts tagged `llm-estimate`, awaiting promotion through the ADR → specs → implementation cycle (see above).
-- **In progress — closing the contract loop:** **GA** (proves each gate's internal sub-topology honors its declared timing/behavior; contract verifier, golden internals, twin, and advisory norms exist — the agent loop and twin-driven timing tuner do not yet), with **CA** as dev lead (schemas → Rust gate implementations → co-sim runs with statistically emulated externals → feasibility verdicts + measured lower bounds), plus the feedback path that lets lower-level evidence demote and re-trigger the levels above it. First vertical slice: `silicon_sandwiches` in the co-sim twin.
+- **In progress — closing the lower layers:** **CA** as owner of the simulation and implementation layers (schemas → Rust/wasm gate implementations → co-sim runs with statistically emulated externals → feasibility verdicts + measured lower bounds; one translation per environment document), plus the feedback path that lets lower-layer evidence demote and re-trigger the layers above it. Gate-internals tooling (`gate_proof`, the twin's advisory timing norms) persists as verifiers in this loop. First vertical slice: `silicon_sandwiches` in the co-sim twin.
 - **The outer loop:** real-use feedback — a path from observed usage back into the system that can regenerate the architecture or rewrite the kata. This is what closes *usefulness*, and it's the loop no static check can substitute for.
 - **The real milestone:** applying the closed loop to a system that actually gets used, not just katas.
 

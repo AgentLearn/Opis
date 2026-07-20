@@ -1,5 +1,15 @@
 # GA — Gate Architect: implementation plan
 
+> **Status (2026-07-20): historical.** GA as a standing agent is retired. Under
+> the four-layer / two-agent architecture (flow → gates → simulation →
+> implementation; **FA owns layers 1–2, CA owns layers 3–4**, the User decides
+> via ADR/DDR), GA's former responsibilities are split: gate-contract proposals
+> and amendments belong to FA, decisions and lifecycle promotion to the User,
+> evidence to CA's simulation/implementation runs. Phases 1–4 below are built
+> and survive as tooling (`gate_proof.py`, `da-twin`, the latency library);
+> Phase 5's timing tuner, if built, lands as tooling in CA's simulation layer,
+> and Phase 6 (a GA agent) is off. Kept for the still-valid technical detail.
+
 The second and final agent loop (FA = topology loop; GA = contract loop; CA is
 not a peer loop but the dev lead serving GA — flow-scoped, ephemeral outputs).
 FA proved a flow's topology satisfies its requirements; GA proves each gate's

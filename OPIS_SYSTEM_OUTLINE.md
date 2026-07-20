@@ -77,6 +77,15 @@ files ([agents/environments/](agents/environments/)); flows stay infra-blind;
 one flow × N environments = N translations. Env-can't-carry-contract is a
 falsification class.
 
+**D15 — Four layers, two agents (2026-07-20).** The description hierarchy is
+**flow → gates → simulation → implementation**. FA owns layers 1–2 (flow design
++ gate-contract proposal/amendment, always via ADR); CA owns layers 3–4
+(simulation + per-environment implementations, DDRs at layer 4). The User is
+the only decision authority on both channels. Gates are a shared cross-kata
+library pinned by flows; per-kata cardinality stays 1 flow : 1 simulation : n
+implementations (D14). Supersedes the three-agent hierarchy; GA stays retired —
+its role is split FA (proposal) / User (decision) / CA (evidence).
+
 ---
 
 ## 2. The specification language ([OpisDescription.md](OpisDescription.md) §Opis)
@@ -155,16 +164,16 @@ required-input bundle.
 
 | Part | What it owns |
 |---|---|
-| **FA** ([agents/fa/](agents/fa/)) | kata → taxonomy → flow iterations → ADR proposals → committed, pinned, proved flows. Fable-5 for design, Sonnet-5 for transcription |
-| **You (via ADRs)** | every contract decision; the only non-agent in the loop |
-| **CA** ([agents/ca/](agents/ca/)) | dev-lead role: contracts → schemas → real Rust/wasm gates → harness → co-sim → tamper. Translation failure = falsified contract |
+| **FA** ([agents/fa/](agents/fa/)) | layers 1–2 (flow + gates): kata → taxonomy → flow iterations → gate proposals/amendments via ADR → committed, pinned, proved flows. Fable-5 for design, Sonnet-5 for transcription |
+| **You (via ADRs/DDRs)** | every contract and implementation decision; the only non-agent in the loop |
+| **CA** ([agents/ca/](agents/ca/)) | layers 3–4 (simulation + implementation): contracts → schemas → real Rust/wasm gates → harness → co-sim → tamper → per-environment translations. Translation failure = falsified contract |
 | **Static verifiers** ([tools/opis-eval/](tools/opis-eval/)) | eval (14 structural checks), proof (coverage+conformance), contract_lint (advisory), schema_check, dep_check, pins, evidence, regress |
 | **da-twin** ([agents/crates/da-twin/](agents/crates/da-twin/)) | the Monte Carlo: virtual clock, logic-aware joins, lognormal latencies, progressive substitution, forge-on-the-wire tamper |
 | **Workspace** ([workspace/](workspace/)) | agents' own repo: flows, ADR registers, defect histories, evidence, CA ephemerals |
 
-(GA as a peer agent loop was ruled OFF 2026-07-04 — evidence consumers are you,
-via the same ADR channel. gate_proof.py survives as a verifier for gate
-internals.)
+(GA as a peer agent loop was ruled OFF 2026-07-04 and stays off under D15 —
+the gate layer belongs to FA, decisions to you via the same ADR channel.
+gate_proof.py survives as a verifier for gate internals.)
 
 ---
 
